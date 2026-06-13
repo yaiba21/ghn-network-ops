@@ -89,6 +89,9 @@ function filterTrips(filter: FilterState): FactTrip[] {
       return false;
     if (filter.carrier && filter.carrier !== "all" && t.carrier !== filter.carrier)
       return false;
+    // Mã tuyến = origin->dest
+    if (filter.laneCode && `${t.originCode}->${t.destCode}` !== filter.laneCode)
+      return false;
     return true;
   });
 }
@@ -1321,58 +1324,7 @@ export function getStageOverview(filter: FilterState): StageMetricCard[] {
   ];
 }
 
-export type StageBreakdownRow = {
-  bcOrKtc: string;
-  type: "BC" | "KTC";
-  region: string;
-  throughput: number;
-  ltMedianH: number;
-  successRate: number;
-  status: Status;
-};
-
-export function getStageBreakdown(
-  filter: FilterState,
-  stageKey: StageKey,
-): StageBreakdownRow[] {
-  const orders = filterOrders(filter);
-  const isFirstMile = stageKey === "fm";
-
-  // Group by BC for FM/LM, by KTC for KTC stages
-  const map = new Map<string, { count: number; success: number; ltSum: number; ltN: number }>();
-  for (const o of orders) {
-    const node = isFirstMile ? o.bcLayCode : stageKey === "lm" ? o.bcGiaoCode : o.ktcCode;
-    if (!node) continue;
-    let cur = map.get(node);
-    if (!cur) {
-      cur = { count: 0, success: 0, ltSum: 0, ltN: 0 };
-      map.set(node, cur);
-    }
-    cur.count += 1;
-    if (o.finalStatus === "delivered") cur.success += 1;
-    if (o.deliveredTs) {
-      cur.ltSum +=
-        (new Date(o.deliveredTs).getTime() - new Date(o.createdTs).getTime()) /
-        3600000;
-      cur.ltN += 1;
-    }
-  }
-
-  const rows: StageBreakdownRow[] = [];
-  for (const [code, agg] of map.entries()) {
-    const sr = round1(pct(agg.success, agg.count));
-    rows.push({
-      bcOrKtc: code,
-      type: code.startsWith("BC-") ? "BC" : "KTC",
-      region: code.split("-")[1] ?? "—",
-      throughput: agg.count,
-      ltMedianH: agg.ltN > 0 ? round1(agg.ltSum / agg.ltN) : 0,
-      successRate: sr,
-      status: sr >= 90 ? "green" : sr >= 85 ? "amber" : "red",
-    });
-  }
-  return rows.sort((a, b) => b.throughput - a.throughput).slice(0, 50);
-}
+// (getStageBreakdown đã bỏ — trang /stages gỡ, breakdown first-mile không dùng)
 
 // =============================================================================
 // PHASE 4b — /routing extras
@@ -1384,6 +1336,10 @@ export type ChannelLayerFlow = {
   ordersTotal: number;
   changedWh: number;
   newAddrChangedWh: number;
+  // 3 tỷ lệ đổi kho phân biệt mẫu số
+  doiKhoOverall: number;
+  doiKhoNewAddr: number;
+  doiKhoOldAddr: number;
 };
 
 export function getRoutingChannelFlow(filter: FilterState): ChannelLayerFlow[] {
@@ -1399,16 +1355,161 @@ export function getRoutingChannelFlow(filter: FilterState): ChannelLayerFlow[] {
 
   return channels.map((c) => {
     const channelOrders = orders.filter((o) => o.channel === c.code);
+    const newAddr = channelOrders.filter((o) => o.phuongIsNew);
+    const oldAddr = channelOrders.filter((o) => !o.phuongIsNew);
     return {
       channel: c.code,
       channelLabel: c.label,
       ordersTotal: channelOrders.length,
       changedWh: channelOrders.filter((o) => o.isChangedWarehouse).length,
-      newAddrChangedWh: channelOrders.filter(
-        (o) => o.isChangedWarehouse && o.phuongIsNew,
-      ).length,
+      newAddrChangedWh: newAddr.filter((o) => o.isChangedWarehouse).length,
+      doiKhoOverall: computeDoiKhoOverall(channelOrders),
+      doiKhoNewAddr:
+        newAddr.length > 0
+          ? round1(pct(newAddr.filter((o) => o.isChangedWarehouse).length, newAddr.length))
+          : 0,
+      doiKhoOldAddr:
+        oldAddr.length > 0
+          ? round1(pct(oldAddr.filter((o) => o.isChangedWarehouse).length, oldAddr.length))
+          : 0,
     };
   });
+}
+
+// --- Routing: so sánh 14 vùng -------------------------------------------
+
+export type RoutingRegionRow = {
+  regionCode: RegionCode;
+  regionName: string;
+  orders: number;
+  doiKhoOverall: number;
+  doiKhoNewAddr: number;
+  phanTuyenDung: number;
+  status: Status;
+};
+
+export function getRoutingRegionComparison(filter: FilterState): RoutingRegionRow[] {
+  return HEATMAP_REGIONS.map((r) => {
+    const sub = filterOrders({ ...filter, regionCode: r.code });
+    const newAddr = sub.filter((o) => o.phuongIsNew);
+    const dkOverall = computeDoiKhoOverall(sub);
+    const dkNew =
+      newAddr.length > 0
+        ? round1(pct(newAddr.filter((o) => o.isChangedWarehouse).length, newAddr.length))
+        : 0;
+    // % phân tuyến đúng lần đầu ~ 100 - đổi kho (proxy)
+    const ptd = round1(100 - dkOverall);
+    return {
+      regionCode: r.code,
+      regionName: r.name,
+      orders: sub.length,
+      doiKhoOverall: dkOverall,
+      doiKhoNewAddr: dkNew,
+      phanTuyenDung: ptd,
+      status: statusFromValue(KPI.pctPhanTuyenDung, ptd),
+    };
+  }).sort((a, b) => b.orders - a.orders);
+}
+
+// --- Routing: top BC đổi kho + lý do ------------------------------------
+
+export type TopRevertBcRow = {
+  bcCode: string;
+  bcName: string;
+  region: RegionCode;
+  province: string;
+  totalOrders: number;
+  revertCount: number;
+  revertRate: number;
+  topReason: string;
+  status: Status;
+};
+
+const REVERT_REASON_POOL = [
+  "BC nhận đóng / quá tải",
+  "Sai routing rule",
+  "Sai mapping địa chỉ",
+  "Service không hỗ trợ vùng",
+  "Khách đổi địa chỉ giao",
+];
+
+export function getTopRevertBcs(filter: FilterState, limit = 20): TopRevertBcRow[] {
+  const orders = filterOrders(filter);
+  const bcMap = new Map(getBcs().map((b) => [b.code, b]));
+
+  const agg = new Map<string, { total: number; revert: number }>();
+  for (const o of orders) {
+    let cur = agg.get(o.bcGiaoCode);
+    if (!cur) {
+      cur = { total: 0, revert: 0 };
+      agg.set(o.bcGiaoCode, cur);
+    }
+    cur.total += 1;
+    if (o.isChangedWarehouse) cur.revert += 1;
+  }
+
+  const rows: TopRevertBcRow[] = [];
+  for (const [code, a] of agg.entries()) {
+    if (a.revert === 0) continue;
+    const bc = bcMap.get(code);
+    const rate = round1(pct(a.revert, a.total));
+    // Lý do top dựa trên hash của code để deterministic
+    const reasonIdx = code.charCodeAt(code.length - 1) % REVERT_REASON_POOL.length;
+    rows.push({
+      bcCode: code,
+      bcName: bc?.name ?? code,
+      region: (bc?.regionCode ?? "HNO") as RegionCode,
+      province: bc?.provinceCode ?? "—",
+      totalOrders: a.total,
+      revertCount: a.revert,
+      revertRate: rate,
+      topReason: REVERT_REASON_POOL[reasonIdx],
+      status: rate <= 2.3 ? "green" : rate <= 4 ? "amber" : "red",
+    });
+  }
+  return rows.sort((a, b) => b.revertCount - a.revertCount).slice(0, limit);
+}
+
+// --- Routing: KPI tổng hợp cho header -----------------------------------
+
+export type RoutingHeaderKpis = {
+  phanTuyenDung: KpiValue;
+  doiKhoOverall: KpiValue;
+  doiKhoNewAddr: KpiValue;
+  totalRevert: number;
+  costImpact: number;
+};
+
+export function getRoutingHeaderKpis(filter: FilterState): RoutingHeaderKpis {
+  const orders = filterOrders(filter);
+  const newAddr = orders.filter((o) => o.phuongIsNew);
+  const dkOverall = computeDoiKhoOverall(orders);
+  const dkNew =
+    newAddr.length > 0
+      ? round1(pct(newAddr.filter((o) => o.isChangedWarehouse).length, newAddr.length))
+      : 0;
+  const ptd = round1(100 - dkOverall);
+  const revertCount = orders.filter((o) => o.isChangedWarehouse).length;
+
+  const sparkPtd = sparkline7Days(filter, (f) => {
+    const sub = filterOrders(f);
+    return round1(100 - computeDoiKhoOverall(sub));
+  });
+  const sparkDk = sparkline7Days(filter, (f) => computeDoiKhoOverall(filterOrders(f)));
+  const sparkDkNew = sparkline7Days(filter, (f) => {
+    const na = filterOrders(f).filter((o) => o.phuongIsNew);
+    return na.length > 0
+      ? round1(pct(na.filter((o) => o.isChangedWarehouse).length, na.length))
+      : 0;
+  });
+
+  return {
+    phanTuyenDung: buildKpi("pctPhanTuyenDung", ptd, sparkPtd),
+    doiKhoOverall: buildKpi("doiKhoOverall", dkOverall, sparkDk),
+    doiKhoNewAddr: buildKpi("doiKhoMoi", dkNew, sparkDkNew),
+    totalRevert: revertCount,
+    costImpact: revertCount * 10_000,
+  };
 }
 
 export type RevertReasonRow = {
@@ -1610,20 +1711,75 @@ export type TransportKpis = {
   avgCostPerKm: number;
   totalTrips: number;
   totalParcels: number;
+  // Bổ sung theo spec
+  opr: number;          // Order Performance Rate 90-97%
+  odr: number;          // On-time Delivery Rate 90-97%
+  ontimeLayHang: number; // đơn lấy đúng cutoff 49%→85%+
+  fdRate: number;       // FD 4-10%
+  aov: number;          // Average Order Value 18-35k đ
+  leadtimeGanH: number; // ~1.5h
+  leadtimeLtcH: number; // ~4h
 };
 
 export function getTransportKpis(filter: FilterState): TransportKpis {
   const trips = filterTrips(filter);
   const totalKm = trips.reduce((a, b) => a + b.totalKm, 0);
   const totalCost = trips.reduce((a, b) => a + b.cost, 0);
+
+  const orders = filterOrders(filter);
+  const orderIds = new Set(orders.map((o) => o.orderId));
+  const pickups = filterPickups(filter, orderIds);
+
+  // OPR ~ on-time arrival of trips, scaled to 90-97 range
+  const ontimeTrip = computeOntimeVanTai(trips);
+  const opr = round1(Math.min(97, Math.max(90, ontimeTrip)));
+  // ODR ~ ontime delivery of orders
+  const odr = round1(
+    Math.min(97, Math.max(90, computeOntimeNetwork(orders) + 2)),
+  );
+  // Ontime lấy hàng = % pickup đúng cutoff
+  const ontimeLayHang = computePctLtc(pickups);
+  // FD rate
+  const fdRate = computeFailedDeliveryRate(orderIds);
+  // AOV — tổng cước phí / số đơn (mock: cước ~18-35k tỉ lệ weight)
+  const totalCuoc = orders.reduce(
+    (a, o) => a + (18_000 + Math.min(17_000, o.weightKg * 800)),
+    0,
+  );
+  const aov = orders.length > 0 ? Math.round(totalCuoc / orders.length) : 0;
+  // Leadtime gán + LTC từ pickups
+  const leadtimeGanH =
+    pickups.length > 0
+      ? round1(
+          pickups.reduce((a, p) => a + p.leadtimeAssignSec, 0) /
+            pickups.length /
+            3600,
+        )
+      : 0;
+  const leadtimeLtcH =
+    pickups.length > 0
+      ? round1(
+          pickups.reduce((a, p) => a + p.leadtimeLtcSec, 0) /
+            pickups.length /
+            3600,
+        )
+      : 0;
+
   return {
-    ontimeTrip: computeOntimeVanTai(trips),
+    ontimeTrip,
     fillRateKg: computeFillRateKg(trips),
     fillRateOrder: computeFillRateOrder(trips),
     emptyMileage: computeEmptyMileage(trips),
     avgCostPerKm: totalKm > 0 ? Math.round(totalCost / totalKm) : 0,
     totalTrips: trips.length,
     totalParcels: trips.reduce((a, b) => a + b.parcels, 0),
+    opr,
+    odr,
+    ontimeLayHang,
+    fdRate,
+    aov,
+    leadtimeGanH,
+    leadtimeLtcH,
   };
 }
 
@@ -1721,4 +1877,264 @@ export function getTransportByRouteType(filter: FilterState): TransportRouteType
       emptyPct: computeEmptyMileage(ts),
     };
   });
+}
+
+
+// =============================================================================
+// PHASE 6 — Transport: bảng sức khoẻ tuyến (lane = nhiều trip)
+// =============================================================================
+
+export type LaneHealthRow = {
+  laneCode: string;       // origin→dest
+  origin: string;
+  dest: string;
+  trips: number;
+  ontime: number;
+  fillRateKg: number;
+  emptyPct: number;
+  avgCost: number;
+  totalParcels: number;
+  status: Status;
+};
+
+export function getLaneHealth(filter: FilterState, limit = 30): LaneHealthRow[] {
+  const trips = filterTrips(filter);
+  const map = new Map<string, FactTrip[]>();
+  for (const t of trips) {
+    const key = `${t.originCode}->${t.destCode}`;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key)!.push(t);
+  }
+
+  const rows: LaneHealthRow[] = [];
+  for (const [key, ts] of map.entries()) {
+    if (ts.length < 2) continue; // chỉ tuyến có ≥2 trip mới gọi là "lane"
+    const [origin, dest] = key.split("->");
+    const ontime = computeOntimeVanTai(ts);
+    const fillKg = computeFillRateKg(ts);
+    const empty = computeEmptyMileage(ts);
+    const status = worstStatus(
+      statusFromValue(KPI.ontimeVanTai, ontime),
+      statusFromValue(KPI.fillRateKg, fillKg),
+      statusFromValue(KPI.pctEmptyMileage, empty),
+    );
+    rows.push({
+      laneCode: key,
+      origin,
+      dest,
+      trips: ts.length,
+      ontime,
+      fillRateKg: fillKg,
+      emptyPct: empty,
+      avgCost: Math.round(ts.reduce((a, b) => a + b.cost, 0) / ts.length),
+      totalParcels: ts.reduce((a, b) => a + b.parcels, 0),
+      status,
+    });
+  }
+  return rows.sort((a, b) => b.trips - a.trips).slice(0, limit);
+}
+
+/** Danh sách mã tuyến cho filter dropdown. */
+export function getLaneCodesForFilter(filter: FilterState): { value: string; label: string }[] {
+  return getLaneHealth(filter, 60).map((l) => ({
+    value: l.laneCode,
+    label: `${l.origin} → ${l.dest} (${l.trips} trip)`,
+  }));
+}
+
+// =============================================================================
+// PHASE 6 — Network: BC state count + drill-down + sub-metrics
+// =============================================================================
+
+export type RegionBcStateRow = {
+  regionCode: RegionCode;
+  regionName: string;
+  totalBc: number;
+  stable: number;       // ổn định
+  overload: number;     // quá tải (đơn pending sort cao)
+  slaBreach: number;    // vượt SLA
+  costBreach: number;   // vượt cost target
+};
+
+/** Đếm BC theo trạng thái trong từng vùng. Deterministic theo BC code hash. */
+export function getRegionBcStates(filter: FilterState): RegionBcStateRow[] {
+  const bcs = getBcs();
+  return HEATMAP_REGIONS.map((r) => {
+    const regionBcs = bcs.filter((b) => b.regionCode === r.code);
+    let stable = 0,
+      overload = 0,
+      slaBreach = 0,
+      costBreach = 0;
+    for (const b of regionBcs) {
+      // Hash code → phân loại deterministic
+      const h = b.code.split("").reduce((a, c) => a + c.charCodeAt(0), 0);
+      const r1 = (h % 100) / 100;
+      if (r1 < 0.7) stable += 1;
+      else if (r1 < 0.82) overload += 1;
+      else if (r1 < 0.92) slaBreach += 1;
+      else costBreach += 1;
+    }
+    return {
+      regionCode: r.code,
+      regionName: r.name,
+      totalBc: regionBcs.length,
+      stable,
+      overload,
+      slaBreach,
+      costBreach,
+    };
+  }).sort((a, b) => b.totalBc - a.totalBc);
+}
+
+export type BcDrillRow = {
+  bcCode: string;
+  bcName: string;
+  province: string;
+  ordersHandled: number;
+  pendingSort: number;
+  tatHours: number;
+  costPerKg: number;
+  state: "stable" | "overload" | "slaBreach" | "costBreach";
+  status: Status;
+};
+
+const BC_STATE_LABEL: Record<BcDrillRow["state"], string> = {
+  stable: "Ổn định",
+  overload: "Quá tải",
+  slaBreach: "Vượt SLA",
+  costBreach: "Vượt cost",
+};
+
+export function bcStateLabel(s: BcDrillRow["state"]): string {
+  return BC_STATE_LABEL[s];
+}
+
+/** Drill xuống danh sách BC trong 1 vùng. */
+export function getBcDrillByRegion(
+  filter: FilterState,
+  regionCode: RegionCode,
+  limit = 50,
+): BcDrillRow[] {
+  const bcs = getBcs().filter((b) => b.regionCode === regionCode);
+  const orders = filterOrders({ ...filter, regionCode });
+  // Count orders by BC giao
+  const orderCount = new Map<string, number>();
+  for (const o of orders) {
+    orderCount.set(o.bcGiaoCode, (orderCount.get(o.bcGiaoCode) ?? 0) + 1);
+  }
+
+  const rows: BcDrillRow[] = bcs.map((b) => {
+    const h = b.code.split("").reduce((a, c) => a + c.charCodeAt(0), 0);
+    const r1 = (h % 100) / 100;
+    const state: BcDrillRow["state"] =
+      r1 < 0.7 ? "stable" : r1 < 0.82 ? "overload" : r1 < 0.92 ? "slaBreach" : "costBreach";
+    const ordersHandled = orderCount.get(b.code) ?? 0;
+    const pendingSort = Math.round(ordersHandled * (state === "overload" ? 0.25 : 0.08));
+    const tatHours = round1(
+      4 + (state === "slaBreach" ? 5 : state === "overload" ? 3 : 0) + (h % 10) / 10,
+    );
+    const costPerKg = Math.round(
+      1850 + (state === "costBreach" ? 400 : 0) + (h % 200),
+    );
+    const status: Status =
+      state === "stable" ? "green" : state === "overload" || state === "slaBreach" ? "amber" : "red";
+    return {
+      bcCode: b.code,
+      bcName: b.name,
+      province: b.provinceCode,
+      ordersHandled,
+      pendingSort,
+      tatHours,
+      costPerKg,
+      state,
+      status,
+    };
+  });
+  return rows
+    .sort((a, b) => b.ordersHandled - a.ordersHandled)
+    .slice(0, limit);
+}
+
+// --- Network sub-metrics (tự suy công thức + mock visualize) -------------
+
+export type NetworkSubMetric = {
+  key: string;
+  label: string;
+  formula: string;
+  value: number;
+  unit: string;
+  target: number;
+  status: Status;
+  trend: number[]; // 7-day sparkline
+};
+
+export function getNetworkSubMetrics(filter: FilterState): NetworkSubMetric[] {
+  // Deterministic mock dựa trên filter
+  const seed = `${filter.from}:${filter.to}:${filter.regionCode ?? ""}`;
+  const h = seed.split("").reduce((a, c) => a + c.charCodeAt(0), 0);
+  const jitter = (base: number, range: number, salt: number) =>
+    round1(base + (((h + salt) % 100) / 100 - 0.5) * 2 * range);
+  const spark = (base: number, range: number, salt: number) =>
+    Array.from({ length: 7 }, (_, i) =>
+      round1(base + (((h + salt + i * 7) % 100) / 100 - 0.5) * 2 * range),
+    );
+
+  const xuatKienOntime = jitter(94, 4, 1);
+  const choNhapKtc = jitter(38, 12, 2);   // phút
+  const tgSorting = jitter(52, 15, 3);    // phút
+  const saiLechKlkt = jitter(1.8, 0.8, 4); // %
+  const soLanQuaKtc = jitter(1.6, 0.4, 5); // lần
+
+  return [
+    {
+      key: "xuat-kien-ontime",
+      label: "% Xuất kiện ontime tại BC lấy",
+      formula: "# kiện xuất đúng cutoff / # kiện cần xuất",
+      value: xuatKienOntime,
+      unit: "%",
+      target: 95,
+      status: xuatKienOntime >= 95 ? "green" : xuatKienOntime >= 90 ? "amber" : "red",
+      trend: spark(94, 3, 1),
+    },
+    {
+      key: "cho-nhap-ktc",
+      label: "Thời gian chờ nhập KTC",
+      formula: "AVG(received_at_ktc − arrive_at_ktc)",
+      value: choNhapKtc,
+      unit: "phút",
+      target: 30,
+      status: choNhapKtc <= 30 ? "green" : choNhapKtc <= 45 ? "amber" : "red",
+      trend: spark(38, 8, 2),
+    },
+    {
+      key: "tg-sorting",
+      label: "Thời gian sorting tại KTC",
+      formula: "AVG(packed_at_sorting − unpacked_at_sorting)",
+      value: tgSorting,
+      unit: "phút",
+      target: 45,
+      status: tgSorting <= 45 ? "green" : tgSorting <= 60 ? "amber" : "red",
+      trend: spark(52, 10, 3),
+    },
+    {
+      key: "sai-lech-klkt",
+      label: "Tỷ lệ sai lệch KL kê khai (KLKT)",
+      formula: "# đơn lệch KL > 10% / tổng đơn cân",
+      value: saiLechKlkt,
+      unit: "%",
+      target: 1.5,
+      status: saiLechKlkt <= 1.5 ? "green" : saiLechKlkt <= 3 ? "amber" : "red",
+      trend: spark(1.8, 0.5, 4),
+    },
+    {
+      key: "so-lan-qua-ktc",
+      label: "TB số lần hàng đi qua KTC",
+      formula: "SUM(hop count) / tổng đơn",
+      value: soLanQuaKtc,
+      unit: "lần",
+      target: 1.5,
+      status: soLanQuaKtc <= 1.5 ? "green" : soLanQuaKtc <= 2 ? "amber" : "red",
+      trend: spark(1.6, 0.3, 5),
+    },
+  ];
 }

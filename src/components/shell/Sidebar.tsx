@@ -9,7 +9,6 @@ import {
   Truck,
   BarChart3,
   Settings,
-  Workflow,
   PackageSearch,
   Bus,
   ChevronDown,
@@ -31,7 +30,6 @@ type NavItem = {
 const NAV: NavItem[] = [
   { label: "Tổng Quan", href: "/", icon: LayoutDashboard },
   { label: "Hành Trình Đơn", href: "/journey", icon: PackageSearch },
-  { label: "Các Chặng Vận Hành", href: "/stages", icon: Workflow },
   { label: "Định Tuyến (ORS)", href: "/routing", icon: Route },
   { label: "Mạng Lưới (NDS + KTC)", href: "/network", icon: Truck },
   { label: "Vận Tải", href: "/transport", icon: Bus },
