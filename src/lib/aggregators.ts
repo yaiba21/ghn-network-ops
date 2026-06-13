@@ -183,7 +183,7 @@ function computeDoiKhoMoi(orders: FactOrder[]): number {
   return round1(pct(newAddr.filter((o) => o.isChangedWarehouse).length, newAddr.length));
 }
 
-// Map orderId → finalStatus (memo 1 lần) để tính %TC per-order nhanh.
+// Map orderId → finalStatus (memo 1 lần) để tính %GTC per-order nhanh.
 let _orderStatusMap: Map<string, FinalStatus> | null = null;
 function orderStatusMap(): Map<string, FinalStatus> {
   if (!_orderStatusMap) {
@@ -195,7 +195,7 @@ function orderStatusMap(): Map<string, FinalStatus> {
 }
 
 function computePctTc(orderIds: Set<string>): number {
-  // %TC = đơn GTC / đơn đã đến quyết định giao tại BC giao.
+  // %GTC = đơn GTC / đơn đã đến quyết định giao tại BC giao.
   // Mẫu số = delivered + delivery_failed + returned_success + returned_failed
   // (returns = đơn GTB rồi hoàn). Loại exception/lost/cancelled/in_progress.
   // Range thực tế 88-96%.
@@ -510,7 +510,7 @@ export function getOverviewModuleHealth(filter: FilterState): ModuleHealth[] {
     name: "Last Mile (Giao hàng)",
     subMetrics: [
       {
-        label: "%TC",
+        label: "%GTC",
         value: tc,
         unit: "%",
         status: statusFromValue(KPI.pctTC, tc),
@@ -766,13 +766,13 @@ export function getOverviewAlerts(filter: FilterState): AlertItem[] {
     });
   }
 
-  // 5) %TC thấp
+  // 5) %GTC thấp
   const tc = computePctTc(orderIds);
   if (tc < KPI.pctTC.thresholds[1]) {
     alerts.push({
       id: "low-tc",
       severity: "critical",
-      title: `%TC đang ở ${tc.toFixed(1)}% — dưới ngưỡng ${KPI.pctTC.thresholds[1]}%`,
+      title: `%GTC đang ở ${tc.toFixed(1)}% — dưới ngưỡng ${KPI.pctTC.thresholds[1]}%`,
     });
   }
 
@@ -2686,7 +2686,7 @@ export type SankeyData = {
  *   Tạo đơn → Đã lấy / Huỷ
  *   Đã lấy → Nhập KTC
  *   Nhập KTC → Tại BC giao
- *   Tại BC giao → Giao TC / Giao thất bại
+ *   Tại BC giao → GTC / Giao thất bại
  *   Giao thất bại → Trả TC / Trả thất bại / Thất lạc
  */
 export function getJourneySankey(filter: FilterState): SankeyData {

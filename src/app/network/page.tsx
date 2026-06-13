@@ -111,7 +111,7 @@ export default function NetworkPage() {
       {/* === Scorecard 14 vùng (clickable) === */}
       <Card
         title="Scorecard 14 vùng"
-        subtitle="So sánh: lượng đơn · ontime network · cost/kg · %TC · % hàng ≥4 ca. Bấm vùng để drill xuống BC."
+        subtitle="So sánh: lượng đơn · ontime network · cost/kg · %GTC · % hàng ≥4 ca. Bấm vùng để drill xuống BC."
       >
         <DataTable
           columns={regionColumns}
@@ -338,7 +338,7 @@ const regionColumns: Column<ReturnType<typeof getRegionScorecard>[number]>[] = [
     render: (r) => <span className={pctColor(r.costPerKg, 1970, 2057, false)}>{formatVND(r.costPerKg)}</span>,
   },
   {
-    key: "pctTC", label: "% Giao TC", align: "right", sortable: true, sortValue: (r) => r.pctTC,
+    key: "pctTC", label: "%GTC", align: "right", sortable: true, sortValue: (r) => r.pctTC,
     render: (r) => <span className={pctColor(r.pctTC, 92, 88)}>{formatPct(r.pctTC, 1)}</span>,
   },
   {

@@ -990,7 +990,7 @@ export function getOverallAlerts(filter: FilterState): AlertItem[] {
   out.push({
     id: "tc-region-low",
     severity: "warning",
-    title: "Region Trung %TC giảm xuống dưới target 92%",
+    title: "Region Trung %GTC giảm xuống dưới target 92%",
     time: tstamp(205),
     href: "/routing?regionCode=trung",
   });
@@ -1641,7 +1641,7 @@ export function getModuleHealth(filter: FilterState): ModuleHealthItem[] {
     { key: "sortAccuracy", module: "KTC", metricLabel: "Sort accuracy", href: "/network" },
     { key: "fillRate", module: "Linehaul", metricLabel: "Fill rate", href: "/network" },
     { key: "onTimeArrival", module: "Linehaul", metricLabel: "On-time arrival", href: "/network" },
-    { key: "gtcRate", module: "Last-mile", metricLabel: "%TC", href: "/order-journey" },
+    { key: "gtcRate", module: "Last-mile", metricLabel: "%GTC", href: "/order-journey" },
     { key: "firstAttemptRate", module: "Last-mile", metricLabel: "% TC lần 1", href: "/order-journey" },
     { key: "returnRate", module: "Returns", metricLabel: "Tỷ lệ hoàn", href: "/order-journey" },
   ];

@@ -82,7 +82,7 @@ export default function JourneyPage() {
       {/* === Sankey flow đơn === */}
       <Card
         title="Sankey — luồng đơn theo trạng thái"
-        subtitle="Độ dày luồng = số đơn. Tạo đơn → Lấy → KTC → BC giao → Giao TC / Thất bại → Trả / Thất lạc."
+        subtitle="Độ dày luồng = số đơn. Tạo đơn → Lấy → KTC → BC giao → GTC / Thất bại → Trả / Thất lạc."
       >
         <SankeyChart data={sankey} height={440} />
       </Card>

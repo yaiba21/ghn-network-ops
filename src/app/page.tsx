@@ -121,7 +121,7 @@ export default function OverallPage() {
 
       {/* === Trend 14 ngày === */}
       <Card
-        title="Trend 14 ngày — sản lượng + Ontime + %TC + Đổi kho"
+        title="Trend 14 ngày — sản lượng + Ontime + %GTC"
         subtitle="Xu hướng theo ngày. Spike volume thường kèm drop Ontime — kiểm tra ca/lane cụ thể."
       >
         <MetricChart
@@ -146,16 +146,9 @@ export default function OverallPage() {
             },
             {
               key: "pctTC",
-              label: "%TC",
+              label: "%GTC",
               type: "line",
               color: "#1F2937",
-              yAxisId: "right",
-            },
-            {
-              key: "doiKho",
-              label: "% Đổi kho",
-              type: "line",
-              color: "#DC2626",
               yAxisId: "right",
             },
           ]}
@@ -335,7 +328,7 @@ const channelColumns: Column<
   },
   {
     key: "pctTC",
-    label: "%TC",
+    label: "%GTC",
     align: "right",
     sortable: true,
     sortValue: (r) => r.pctTC,

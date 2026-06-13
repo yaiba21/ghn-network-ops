@@ -102,7 +102,7 @@ export default function DailyOpsPage() {
                 <StatusDot status={s.status} />
               </div>
               <div className="text-xl font-semibold tabular-nums">{formatCompactInt(s.throughput)}</div>
-              <div className="text-[10px] text-[var(--color-text-muted)]">đơn · {formatPct(s.successRate, 0)} TC</div>
+              <div className="text-[10px] text-[var(--color-text-muted)]">đơn · {formatPct(s.successRate, 0)} GTC</div>
             </div>
           ))}
         </div>
@@ -128,7 +128,7 @@ const regionColumns: Column<ReturnType<typeof getRegionScorecard>[number]>[] = [
     render: (r) => <span className={r.costPerKg <= 1970 ? "text-emerald-600" : r.costPerKg <= 2057 ? "text-amber-600" : "text-red-600"}>{formatVND(r.costPerKg)}</span>,
   },
   {
-    key: "pctTC", label: "% Giao TC", align: "right", sortable: true, sortValue: (r) => r.pctTC,
+    key: "pctTC", label: "%GTC", align: "right", sortable: true, sortValue: (r) => r.pctTC,
     render: (r) => <span className={r.pctTC >= 92 ? "text-emerald-600" : r.pctTC >= 88 ? "text-amber-600" : "text-red-600"}>{formatPct(r.pctTC, 1)}</span>,
   },
   { key: "status", label: "Trạng thái", align: "right", render: (r) => <div className="inline-flex"><StatusBadge status={r.status} /></div> },

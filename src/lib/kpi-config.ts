@@ -235,7 +235,7 @@ export const KPI: Record<string, KpiSpec> = {
   // --- Journey: Stage 1 — Nhận hàng (Pickup) -----------------------------
   firstAttemptRate: {
     key: "firstAttemptRate",
-    label: "% Giao TC lần 1",
+    label: "%GTC lần 1",
     unit: "%",
     direction: "higher-better",
     baseline: 82,
@@ -553,7 +553,7 @@ export const KPI: Record<string, KpiSpec> = {
   pctTC: {
     // Công thức: GTC / tổng lượt giao. Range 88-96%.
     key: "pctTC",
-    label: "%TC (Giao thành công)",
+    label: "%GTC (Giao thành công)",
     unit: "%",
     direction: "higher-better",
     baseline: 91,
