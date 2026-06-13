@@ -1,6 +1,6 @@
 "use client";
 
-import { Menu, Bell, ChevronDown } from "lucide-react";
+import { Menu, Bell } from "lucide-react";
 import { Logo } from "../Logo";
 import { useSidebar } from "./SidebarContext";
 
@@ -25,16 +25,6 @@ export function TopBar() {
       </div>
 
       <div className="flex-1" />
-
-      <button
-        type="button"
-        className="flex items-center gap-2 h-9 px-3 text-sm border border-[var(--color-border)] rounded-md hover:bg-[var(--color-hover)]"
-      >
-        <span className="text-[var(--color-text)] max-w-[220px] truncate">
-          2315 - Bưu Cục 89 Nguyễn Thị Định
-        </span>
-        <ChevronDown className="w-3.5 h-3.5 text-[var(--color-text-muted)]" />
-      </button>
 
       <button
         type="button"

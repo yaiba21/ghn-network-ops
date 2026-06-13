@@ -20,13 +20,15 @@ import { cn } from "@/lib/utils";
 import {
   CA_LABEL_VI,
   CHANNEL_LABEL_VI,
-  LOAI_BC_LABEL_VI,
+  LOAI_DICH_VU_BC_LABEL_VI,
   LOAI_HANG_LABEL_VI,
+  LOAI_HOAT_DONG_LABEL_VI,
   LOAI_TUYEN_LABEL_VI,
   type CaCode,
   type ChannelCode,
-  type LoaiBcCode,
+  type LoaiDichVuBc,
   type LoaiHang,
+  type LoaiHoatDongBc,
   type LoaiTuyen,
   type SlaDays,
 } from "@/lib/types";
@@ -47,7 +49,10 @@ type Props = {
     // Phase 1
     bc?: boolean;
     channel?: boolean;
+    /** @deprecated dùng loaiHoatDong + loaiDichVu */
     loaiBc?: boolean;
+    loaiHoatDong?: boolean;
+    loaiDichVu?: boolean;
     ca?: boolean;
     loaiHang?: boolean;
     loaiTuyen?: boolean;
@@ -72,6 +77,8 @@ const DEFAULT_SHOW: Required<NonNullable<Props["show"]>> = {
   bc: false,
   channel: false,
   loaiBc: false,
+  loaiHoatDong: false,
+  loaiDichVu: false,
   ca: false,
   loaiHang: false,
   loaiTuyen: false,
@@ -88,16 +95,17 @@ const CHANNEL_OPTS: { value: ChannelCode; label: string }[] = [
   "cb",
 ].map((c) => ({ value: c as ChannelCode, label: CHANNEL_LABEL_VI[c as ChannelCode] }));
 
-const LOAI_BC_OPTS: { value: LoaiBcCode; label: string }[] = [
-  "hon-hop",
-  "chuyen-giao",
-  "chuyen-lay",
-  "b2b",
-  "gxt",
-  "hang-vua",
-  "khl",
-  "ahamove",
-].map((c) => ({ value: c as LoaiBcCode, label: LOAI_BC_LABEL_VI[c as LoaiBcCode] }));
+const LOAI_HOAT_DONG_OPTS: { value: LoaiHoatDongBc; label: string }[] = [
+  { value: "lay", label: LOAI_HOAT_DONG_LABEL_VI.lay },
+  { value: "tra", label: LOAI_HOAT_DONG_LABEL_VI.tra },
+  { value: "hon-hop", label: LOAI_HOAT_DONG_LABEL_VI["hon-hop"] },
+];
+
+const LOAI_DICH_VU_OPTS: { value: LoaiDichVuBc; label: string }[] = [
+  { value: "b2b", label: LOAI_DICH_VU_BC_LABEL_VI.b2b },
+  { value: "khl", label: LOAI_DICH_VU_BC_LABEL_VI.khl },
+  { value: "ahamove", label: LOAI_DICH_VU_BC_LABEL_VI.ahamove },
+];
 
 const CA_OPTS: { value: CaCode; label: string }[] = [
   "ca1",
@@ -106,8 +114,9 @@ const CA_OPTS: { value: CaCode; label: string }[] = [
 ].map((c) => ({ value: c as CaCode, label: CA_LABEL_VI[c as CaCode] }));
 
 const LOAI_HANG_OPTS: { value: LoaiHang; label: string }[] = [
-  { value: "standard", label: LOAI_HANG_LABEL_VI.standard },
-  { value: "bulky", label: LOAI_HANG_LABEL_VI.bulky },
+  { value: "tieu-chuan", label: LOAI_HANG_LABEL_VI["tieu-chuan"] },
+  { value: "cong-kenh", label: LOAI_HANG_LABEL_VI["cong-kenh"] },
+  { value: "nang", label: LOAI_HANG_LABEL_VI.nang },
 ];
 
 const LOAI_TUYEN_OPTS: { value: LoaiTuyen; label: string }[] = [
@@ -350,29 +359,18 @@ export function FilterBar({ show, extras, className }: Props) {
         />
       )}
 
-      {cfg.loaiBc && (
+      {cfg.loaiHoatDong && (
         <DimensionSelect
-          label="Loại BC"
+          label="Loại hình hoạt động"
           value={
-            filter.loaiBc && filter.loaiBc !== "all" ? filter.loaiBc : undefined
+            filter.loaiHoatDong && filter.loaiHoatDong !== "all"
+              ? filter.loaiHoatDong
+              : undefined
           }
-          options={LOAI_BC_OPTS}
-          onChange={(v) => setFilter({ loaiBc: v ?? "all" })}
-          allOptionLabel="Tất cả loại BC"
-          width={180}
-        />
-      )}
-
-      {cfg.ca && (
-        <DimensionSelect
-          label="Ca"
-          value={
-            filter.caCode && filter.caCode !== "all" ? filter.caCode : undefined
-          }
-          options={CA_OPTS}
-          onChange={(v) => setFilter({ caCode: v ?? "all" })}
-          allOptionLabel="Tất cả ca"
-          width={150}
+          options={LOAI_HOAT_DONG_OPTS}
+          onChange={(v) => setFilter({ loaiHoatDong: v ?? "all" })}
+          allOptionLabel="Tất cả"
+          width={170}
         />
       )}
 
@@ -386,6 +384,21 @@ export function FilterBar({ show, extras, className }: Props) {
           }
           options={LOAI_HANG_OPTS}
           onChange={(v) => setFilter({ loaiHang: v ?? "all" })}
+          allOptionLabel="Tất cả"
+          width={150}
+        />
+      )}
+
+      {cfg.loaiDichVu && (
+        <DimensionSelect
+          label="Loại dịch vụ"
+          value={
+            filter.loaiDichVu && filter.loaiDichVu !== "all"
+              ? filter.loaiDichVu
+              : undefined
+          }
+          options={LOAI_DICH_VU_OPTS}
+          onChange={(v) => setFilter({ loaiDichVu: v ?? "all" })}
           allOptionLabel="Tất cả"
           width={150}
         />

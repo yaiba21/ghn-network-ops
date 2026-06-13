@@ -539,6 +539,17 @@ export const KPI: Record<string, KpiSpec> = {
     target: 87.7,
     thresholds: [87.7, 85],
   },
+  fdRate: {
+    // FD — Failed Delivery Rate: đơn giao thất bại / tổng lượt giao.
+    // Range 4-10%. Target ≤5%.
+    key: "fdRate",
+    label: "FD (Failed Delivery Rate)",
+    unit: "%",
+    direction: "lower-better",
+    baseline: 7,
+    target: 5,
+    thresholds: [5, 10],
+  },
   pctTC: {
     // Công thức: GTC / tổng lượt giao. Range 88-96%.
     key: "pctTC",

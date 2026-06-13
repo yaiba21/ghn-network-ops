@@ -10,8 +10,9 @@ import type {
   ChannelCode,
   FilterState,
   Granularity,
-  LoaiBcCode,
+  LoaiDichVuBc,
   LoaiHang,
+  LoaiHoatDongBc,
   LoaiTuyen,
   RegionCode,
   ServiceType,
@@ -47,19 +48,10 @@ const CARRIERS: (Carrier | "all")[] = ["all", "internal", "tpl-a", "tpl-b", "tpl
 
 // Phase 1 — Dimensions mới
 const CHANNELS_ALL: (ChannelCode | "all")[] = ["all", "tts", "spe", "sme", "ka", "b2b", "cb"];
-const LOAI_BCS_ALL: (LoaiBcCode | "all")[] = [
-  "all",
-  "hon-hop",
-  "chuyen-giao",
-  "chuyen-lay",
-  "b2b",
-  "gxt",
-  "hang-vua",
-  "khl",
-  "ahamove",
-];
+const LOAI_HOAT_DONGS_ALL: (LoaiHoatDongBc | "all")[] = ["all", "lay", "tra", "hon-hop"];
+const LOAI_DICH_VUS_ALL: (LoaiDichVuBc | "all")[] = ["all", "thuong", "b2b", "khl", "ahamove"];
 const CAS_ALL: (CaCode | "all")[] = ["all", "ca1", "ca2", "ca3"];
-const LOAI_HANGS_ALL: (LoaiHang | "all")[] = ["all", "standard", "bulky"];
+const LOAI_HANGS_ALL: (LoaiHang | "all")[] = ["all", "tieu-chuan", "cong-kenh", "nang"];
 const LOAI_TUYENS_ALL: (LoaiTuyen | "all")[] = ["all", "noi-vung", "lien-vung"];
 const SLA_DAYS_ALL: (SlaDays | "all")[] = ["all", 1, 2, 3];
 
@@ -115,8 +107,11 @@ export function parseFilterFromParams(sp: URLSearchParams): FilterState {
   const ch = sp.get("ch") as ChannelCode | "all" | null;
   const validCh = ch && CHANNELS_ALL.includes(ch) ? ch : "all";
 
-  const lbc = sp.get("lbc") as LoaiBcCode | "all" | null;
-  const validLbc = lbc && LOAI_BCS_ALL.includes(lbc) ? lbc : "all";
+  const lhd = sp.get("lhd") as LoaiHoatDongBc | "all" | null;
+  const validLhd = lhd && LOAI_HOAT_DONGS_ALL.includes(lhd) ? lhd : "all";
+
+  const ldv = sp.get("ldv") as LoaiDichVuBc | "all" | null;
+  const validLdv = ldv && LOAI_DICH_VUS_ALL.includes(ldv) ? ldv : "all";
 
   const ca = sp.get("ca") as CaCode | "all" | null;
   const validCa = ca && CAS_ALL.includes(ca) ? ca : "all";
@@ -149,7 +144,8 @@ export function parseFilterFromParams(sp: URLSearchParams): FilterState {
     // Phase 1
     bcCode: sp.get("bc") ?? undefined,
     channelCode: validCh,
-    loaiBc: validLbc,
+    loaiHoatDong: validLhd,
+    loaiDichVu: validLdv,
     caCode: validCa,
     loaiHang: validLh,
     loaiTuyen: validLt,
@@ -177,7 +173,8 @@ export function serializeFilter(filter: FilterState): URLSearchParams {
   // Phase 1
   if (filter.bcCode) sp.set("bc", filter.bcCode);
   if (filter.channelCode && filter.channelCode !== "all") sp.set("ch", filter.channelCode);
-  if (filter.loaiBc && filter.loaiBc !== "all") sp.set("lbc", filter.loaiBc);
+  if (filter.loaiHoatDong && filter.loaiHoatDong !== "all") sp.set("lhd", filter.loaiHoatDong);
+  if (filter.loaiDichVu && filter.loaiDichVu !== "all") sp.set("ldv", filter.loaiDichVu);
   if (filter.caCode && filter.caCode !== "all") sp.set("ca", filter.caCode);
   if (filter.loaiHang && filter.loaiHang !== "all") sp.set("lh", filter.loaiHang);
   if (filter.loaiTuyen && filter.loaiTuyen !== "all") sp.set("lt", filter.loaiTuyen);

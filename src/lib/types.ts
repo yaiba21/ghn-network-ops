@@ -127,30 +127,45 @@ export type Bc = {
   provinceCode: string;
   regionCode: RegionCode;
   ktcCode: string;       // KTC mà BC này thuộc về (n:m thực tế, ở đây simplify 1 BC → 1 KTC chính)
-  loaiBc: LoaiBcCode;    // 8 loại theo spec
+  // 3 dimension phân loại BC độc lập
+  loaiHoatDong: LoaiHoatDongBc;
+  loaiHangBc: LoaiHangBc;
+  loaiDichVu: LoaiDichVuBc;
 };
 
-/** 8 loại bưu cục theo phân loại nghiệp vụ. */
-export type LoaiBcCode =
-  | "hon-hop"       // GLT — Hỗn hợp (giao + lấy + trả)
-  | "chuyen-giao"   // Chỉ giao
-  | "chuyen-lay"    // Chỉ lấy
-  | "b2b"           // B2B chuyên dụng
-  | "gxt"           // Giao xuyên tỉnh
-  | "hang-vua"      // Hàng vừa
-  | "khl"           // Khu hạ lưu
-  | "ahamove";      // Đối tác Ahamove
+/** Loại bưu cục — chia 3 dimension độc lập (refactor 2026-06):
+ *  1) Loại hình hoạt động (operation): Lấy / Trả / Hỗn hợp
+ *  2) Loại hàng phục vụ (cargo): Tiêu chuẩn / Cồng kềnh / Nặng
+ *  3) Loại dịch vụ chuyên (service line): Thường / B2B / KHL / Ahamove
+ */
+export type LoaiHoatDongBc = "lay" | "tra" | "hon-hop";
+export type LoaiHangBc = "tieu-chuan" | "cong-kenh" | "nang";
+export type LoaiDichVuBc = "thuong" | "b2b" | "khl" | "ahamove";
 
-export const LOAI_BC_LABEL_VI: Record<LoaiBcCode, string> = {
-  "hon-hop": "Hỗn hợp (GLT)",
-  "chuyen-giao": "Chuyên giao",
-  "chuyen-lay": "Chuyên lấy",
+export const LOAI_HOAT_DONG_LABEL_VI: Record<LoaiHoatDongBc, string> = {
+  lay: "Lấy",
+  tra: "Trả",
+  "hon-hop": "Hỗn hợp",
+};
+
+export const LOAI_HANG_BC_LABEL_VI: Record<LoaiHangBc, string> = {
+  "tieu-chuan": "Tiêu chuẩn",
+  "cong-kenh": "Cồng kềnh",
+  nang: "Nặng",
+};
+
+export const LOAI_DICH_VU_BC_LABEL_VI: Record<LoaiDichVuBc, string> = {
+  thuong: "Thường",
   b2b: "B2B",
-  gxt: "GXT (giao xuyên tỉnh)",
-  "hang-vua": "Hàng vừa",
   khl: "KHL",
   ahamove: "Ahamove",
 };
+
+/** @deprecated dùng 3 dimension độc lập ở trên */
+export type LoaiBcCode = LoaiHoatDongBc;
+
+/** @deprecated */
+export const LOAI_BC_LABEL_VI = LOAI_HOAT_DONG_LABEL_VI;
 
 /** Channel = nguồn đơn. */
 export type ChannelCode = "tts" | "spe" | "sme" | "ka" | "b2b" | "cb";
@@ -173,11 +188,13 @@ export const CA_LABEL_VI: Record<CaCode, string> = {
   ca3: "Ca 3 (15h→)",
 };
 
-export type LoaiHang = "standard" | "bulky";
+/** Loại hàng đơn — 3 giá trị: tiêu chuẩn / cồng kềnh / nặng. */
+export type LoaiHang = "tieu-chuan" | "cong-kenh" | "nang";
 
 export const LOAI_HANG_LABEL_VI: Record<LoaiHang, string> = {
-  standard: "Hàng tiêu chuẩn",
-  bulky: "Hàng cồng kềnh",
+  "tieu-chuan": "Tiêu chuẩn",
+  "cong-kenh": "Cồng kềnh",
+  nang: "Nặng",
 };
 
 export type LoaiTuyen = "noi-vung" | "lien-vung";
@@ -189,13 +206,28 @@ export const LOAI_TUYEN_LABEL_VI: Record<LoaiTuyen, string> = {
 
 export type SlaDays = 1 | 2 | 3;
 
-/** Trạng thái cuối cùng của đơn (final_status). */
-export type FinalStatus = "delivered" | "returned" | "lost" | "in_progress";
+/**
+ * Trạng thái cuối cùng của đơn (final_status).
+ * 6 terminal states + cancelled + in_progress.
+ */
+export type FinalStatus =
+  | "delivered"          // ✓ GTC Giao thành công
+  | "delivery_failed"    // × GTB Giao thất bại (sau >3 attempts)
+  | "returned_success"   // ↩ Hoàn người gửi thành công
+  | "returned_failed"    // × Hoàn thất bại
+  | "exception"          // ⚠ Exception / damage
+  | "lost"               // ✗ Thất lạc
+  | "cancelled"          // ✗ Huỷ
+  | "in_progress";       // ⋯ Đang xử lý
 
 export const FINAL_STATUS_LABEL_VI: Record<FinalStatus, string> = {
   delivered: "Giao thành công",
-  returned: "Hoàn người gửi",
-  lost: "Thất lạc / hư hỏng",
+  delivery_failed: "Giao thất bại",
+  returned_success: "Trả thành công",
+  returned_failed: "Trả thất bại",
+  exception: "Exception",
+  lost: "Thất lạc",
+  cancelled: "Huỷ",
   in_progress: "Đang xử lý",
 };
 
@@ -357,7 +389,11 @@ export type FilterState = {
   // Phase 1 — dimensions mới
   bcCode?: string;
   channelCode?: ChannelCode | "all";
+  /** @deprecated dùng loaiHoatDong + loaiDichVu */
   loaiBc?: LoaiBcCode | "all";
+  // 3 dimension BC mới
+  loaiHoatDong?: LoaiHoatDongBc | "all";
+  loaiDichVu?: LoaiDichVuBc | "all";
   caCode?: CaCode | "all";
   loaiHang?: LoaiHang | "all";
   slaDays?: SlaDays | "all";

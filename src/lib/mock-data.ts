@@ -2394,26 +2394,24 @@ const CHANNEL_WEIGHT: { value: ChannelCode; weight: number }[] = [
   { value: "cb", weight: 3 },
 ];
 
-const LOAI_BC_LIST: LoaiBcCode[] = [
-  "hon-hop",
-  "chuyen-giao",
-  "chuyen-lay",
-  "b2b",
-  "gxt",
-  "hang-vua",
-  "khl",
-  "ahamove",
+// 3 dimension độc lập của Bc — phân phối thực tế.
+const LOAI_HOAT_DONG_WEIGHT = [
+  { value: "hon-hop" as const, weight: 60 },  // Phổ biến nhất: BC vừa lấy vừa trả
+  { value: "lay" as const, weight: 22 },      // Chỉ lấy
+  { value: "tra" as const, weight: 18 },      // Chỉ trả
 ];
 
-const LOAI_BC_WEIGHT: { value: LoaiBcCode; weight: number }[] = [
-  { value: "hon-hop", weight: 50 },
-  { value: "chuyen-giao", weight: 15 },
-  { value: "chuyen-lay", weight: 10 },
-  { value: "b2b", weight: 8 },
-  { value: "gxt", weight: 7 },
-  { value: "hang-vua", weight: 4 },
-  { value: "khl", weight: 3 },
-  { value: "ahamove", weight: 3 },
+const LOAI_HANG_BC_WEIGHT = [
+  { value: "tieu-chuan" as const, weight: 70 },
+  { value: "cong-kenh" as const, weight: 22 },
+  { value: "nang" as const, weight: 8 },
+];
+
+const LOAI_DICH_VU_BC_WEIGHT = [
+  { value: "thuong" as const, weight: 80 },
+  { value: "b2b" as const, weight: 9 },
+  { value: "khl" as const, weight: 6 },
+  { value: "ahamove" as const, weight: 5 },
 ];
 
 const CA_LIST: CaCode[] = ["ca1", "ca2", "ca3"];
@@ -2443,7 +2441,9 @@ const BC_COUNT_BY_PROVINCE: Record<string, number> = {
 }
 
 const BCS: Bc[] = (() => {
-  const rngLoai = seedrandom(MASTER_SEED + ":bc-loai");
+  const rngHd = seedrandom(MASTER_SEED + ":bc-hoatdong");
+  const rngHang = seedrandom(MASTER_SEED + ":bc-hangbc");
+  const rngDv = seedrandom(MASTER_SEED + ":bc-dichvu");
   const out: Bc[] = [];
   for (const p of PROVINCES) {
     const count = BC_COUNT_BY_PROVINCE[p.code] ?? 25;
@@ -2458,7 +2458,9 @@ const BCS: Bc[] = (() => {
         provinceCode: p.code,
         regionCode: p.regionCode,
         ktcCode: defaultKtc,
-        loaiBc: weightedPick(rngLoai, LOAI_BC_WEIGHT),
+        loaiHoatDong: weightedPick(rngHd, LOAI_HOAT_DONG_WEIGHT),
+        loaiHangBc: weightedPick(rngHang, LOAI_HANG_BC_WEIGHT),
+        loaiDichVu: weightedPick(rngDv, LOAI_DICH_VU_BC_WEIGHT),
       });
     }
   }
@@ -2571,8 +2573,10 @@ const FACT_ORDERS: FactOrder[] = (() => {
     // Phường mới/cũ: 20% mới (consistent với spec "is_new_to_address")
     const phuongIsNew = rng() < 0.2;
 
-    // Loại hàng: 85% standard, 15% bulky
-    const loaiHang: LoaiHang = rng() < 0.85 ? "standard" : "bulky";
+    // Loại hàng: 78% tiêu chuẩn, 17% cồng kềnh, 5% nặng
+    const rh = rng();
+    const loaiHang: LoaiHang =
+      rh < 0.78 ? "tieu-chuan" : rh < 0.95 ? "cong-kenh" : "nang";
 
     // SLA days
     let slaDays: SlaDays;
@@ -2584,9 +2588,11 @@ const FACT_ORDERS: FactOrder[] = (() => {
 
     // Weight + COD
     const weightKg =
-      loaiHang === "bulky"
-        ? 5 + rng() * 25
-        : 0.3 + rng() * 2.7;
+      loaiHang === "nang"
+        ? 20 + rng() * 30
+        : loaiHang === "cong-kenh"
+          ? 5 + rng() * 15
+          : 0.3 + rng() * 2.7;
     const hasCod = rng() < 0.4;
     const cod = hasCod ? Math.round(100_000 + rng() * 400_000) : 0;
 
@@ -2616,58 +2622,100 @@ const FACT_ORDERS: FactOrder[] = (() => {
 
     // final_status — 88/8/3/1
     // Adjust by patterns:
-    //   - Tết period: tỷ lệ returned cao hơn (12%) và in_progress cao (5%)
-    //   - Shop nhỏ: % không gán cao → % in_progress cao
-    //   - Bulky/liên vùng: returned + lost cao hơn nhẹ
-    let pDelivered = 0.88;
-    let pReturned = 0.08;
-    let pInProgress = 0.03;
-    let pLost = 0.01;
+    //   - Tết period: tỷ lệ returned cao hơn + in_progress cao + cancel cao
+    //   - Shop nhỏ: % không gán cao → % cancel + in_progress cao
+    //   - Bulky/liên vùng: returned + delivery_failed cao hơn nhẹ
+    // Phân phối mục tiêu: delivered 85% · GTB 3% · returned_success 5% ·
+    //                     returned_failed 1% · exception 0.5% · lost 0.5% ·
+    //                     cancelled 3% · in_progress 2%
+    let pDelivered = 0.85;
+    let pGtb = 0.03;
+    let pRtcc = 0.05;
+    let pRtfail = 0.01;
+    let pExc = 0.005;
+    let pLost = 0.005;
+    let pCancel = 0.03;
+    let pInProg = 0.02;
+
     if (isTetPeriod(day.date)) {
-      pDelivered = 0.78;
-      pReturned = 0.12;
-      pInProgress = 0.08;
-      pLost = 0.02;
+      pDelivered -= 0.07;
+      pGtb += 0.02;
+      pRtcc += 0.02;
+      pCancel += 0.02;
+      pInProg += 0.03;
     }
     if (shop.sizeBucket === "small") {
-      pInProgress += 0.04;
-      pDelivered -= 0.04;
+      pCancel += 0.03;
+      pInProg += 0.02;
+      pDelivered -= 0.05;
     }
-    if (loaiHang === "bulky" || loaiTuyen === "lien-vung") {
-      pReturned += 0.02;
+    if (loaiHang === "cong-kenh" || loaiHang === "nang" || loaiTuyen === "lien-vung") {
+      pGtb += 0.01;
+      pRtcc += 0.01;
       pDelivered -= 0.02;
     }
 
     let finalStatus: FinalStatus;
     const rs = rng();
-    if (rs < pDelivered) finalStatus = "delivered";
-    else if (rs < pDelivered + pReturned) finalStatus = "returned";
-    else if (rs < pDelivered + pReturned + pInProgress) finalStatus = "in_progress";
-    else finalStatus = "lost";
+    let cum = 0;
+    const buckets: { p: number; s: FinalStatus }[] = [
+      { p: pDelivered, s: "delivered" },
+      { p: pGtb, s: "delivery_failed" },
+      { p: pRtcc, s: "returned_success" },
+      { p: pRtfail, s: "returned_failed" },
+      { p: pExc, s: "exception" },
+      { p: pLost, s: "lost" },
+      { p: pCancel, s: "cancelled" },
+      { p: pInProg, s: "in_progress" },
+    ];
+    finalStatus = "delivered";
+    for (const b of buckets) {
+      cum += b.p;
+      if (rs < cum) {
+        finalStatus = b.s;
+        break;
+      }
+    }
 
     // current_state map theo final_status (simplified)
     let currentState: OrderState;
     let pickedTs: string | undefined;
     let deliveredTs: string | undefined;
 
+    const pickH = () => 1.5 + rng() * 4;
+    const setPicked = () => {
+      pickedTs = new Date(createdMs + pickH() * 3600 * 1000).toISOString().slice(0, 19);
+    };
+
     if (finalStatus === "delivered") {
       currentState = "DELIVER_IN_TRIP";
-      // picked: created + lead time ~1.5-5h
-      const pickLeadH = 1.5 + rng() * 3.5;
-      pickedTs = new Date(createdMs + pickLeadH * 3600 * 1000).toISOString().slice(0, 19);
-      // delivered: created + leadtime E2E (P50 36h, P90 60h, P99 90h)
-      // Adjust by loaiTuyen + bulky + Tết
+      setPicked();
       const baseHours = loaiTuyen === "lien-vung" ? 48 : 24;
-      let leadH = baseHours + rng() * 24; // ~24-72h
-      if (loaiHang === "bulky") leadH *= 1.3;
+      let leadH = baseHours + rng() * 24;
+      if (loaiHang === "cong-kenh" || loaiHang === "nang") leadH *= 1.3;
       if (isTetPeriod(day.date)) leadH *= 1.5;
       deliveredTs = new Date(createdMs + leadH * 3600 * 1000).toISOString().slice(0, 19);
-    } else if (finalStatus === "returned") {
-      currentState = rng() < 0.5 ? "RETURN_IN_TRIP" : "RETURN_AT_WAREHOUSE";
-      const pickLeadH = 2 + rng() * 4;
-      pickedTs = new Date(createdMs + pickLeadH * 3600 * 1000).toISOString().slice(0, 19);
-    } else if (finalStatus === "in_progress") {
-      // Stuck ở 1 state trung gian
+    } else if (finalStatus === "delivery_failed") {
+      currentState = "DELIVERY_FAILED";
+      setPicked();
+    } else if (finalStatus === "returned_success") {
+      currentState = "RETURN_IN_TRIP";
+      setPicked();
+    } else if (finalStatus === "returned_failed") {
+      currentState = "RETURN_FAILED";
+      setPicked();
+    } else if (finalStatus === "exception") {
+      currentState = "exception";
+      setPicked();
+    } else if (finalStatus === "lost") {
+      currentState = "lost";
+      setPicked();
+    } else if (finalStatus === "cancelled") {
+      currentState = "CANCEL";
+      // 50% cancelled trước khi pickup
+      if (rng() < 0.5) setPicked();
+    } else {
+      // in_progress — stuck giữa chừng
       const states: OrderState[] = [
         "RECEIVED_AT_SORTING",
         "TRANSPORTING",
@@ -2676,15 +2724,7 @@ const FACT_ORDERS: FactOrder[] = (() => {
         "WAITING_TO_RETURN",
       ];
       currentState = pickOne(rng, states);
-      if (rng() < 0.7) {
-        const pickLeadH = 2 + rng() * 4;
-        pickedTs = new Date(createdMs + pickLeadH * 3600 * 1000).toISOString().slice(0, 19);
-      }
-    } else {
-      // lost / exception
-      currentState = rng() < 0.5 ? "exception" : "lost";
-      const pickLeadH = 2 + rng() * 4;
-      pickedTs = new Date(createdMs + pickLeadH * 3600 * 1000).toISOString().slice(0, 19);
+      if (rng() < 0.7) setPicked();
     }
 
     out.push({
@@ -2870,8 +2910,12 @@ const FACT_DELIVERIES: FactDelivery[] = (() => {
     const ar = rng();
     if (o.finalStatus === "delivered") {
       attempts = ar < 0.8 ? 1 : ar < 0.95 ? 2 : 3;
-    } else if (o.finalStatus === "returned") {
-      attempts = 3; // returned thường thử đủ 3 lần
+    } else if (
+      o.finalStatus === "returned_success" ||
+      o.finalStatus === "returned_failed" ||
+      o.finalStatus === "delivery_failed"
+    ) {
+      attempts = 3; // returned/failed thường thử đủ 3 lần
     } else {
       attempts = 1 + Math.floor(rng() * 2);
     }
@@ -2927,8 +2971,17 @@ export function getChannels(): ChannelCode[] {
   return CHANNELS;
 }
 
+/** @deprecated dùng getLoaiHoatDongs / getLoaiDichVus thay */
 export function getLoaiBcs(): LoaiBcCode[] {
-  return LOAI_BC_LIST;
+  return ["lay", "tra", "hon-hop"];
+}
+
+export function getLoaiHoatDongs(): import("./types").LoaiHoatDongBc[] {
+  return ["lay", "tra", "hon-hop"];
+}
+
+export function getLoaiDichVus(): import("./types").LoaiDichVuBc[] {
+  return ["thuong", "b2b", "khl", "ahamove"];
 }
 
 export function getCaList(): CaCode[] {
@@ -2971,10 +3024,14 @@ export function getFactStats() {
     totalPickups: FACT_PICKUPS.length,
     totalDeliveries: FACT_DELIVERIES.length,
     finalStatusMix: {
-      delivered: round1((byFinal.delivered / total) * 100),
-      returned: round1((byFinal.returned / total) * 100),
-      in_progress: round1((byFinal.in_progress / total) * 100),
-      lost: round1((byFinal.lost / total) * 100),
+      delivered: round1(((byFinal.delivered ?? 0) / total) * 100),
+      delivery_failed: round1(((byFinal.delivery_failed ?? 0) / total) * 100),
+      returned_success: round1(((byFinal.returned_success ?? 0) / total) * 100),
+      returned_failed: round1(((byFinal.returned_failed ?? 0) / total) * 100),
+      exception: round1(((byFinal.exception ?? 0) / total) * 100),
+      lost: round1(((byFinal.lost ?? 0) / total) * 100),
+      cancelled: round1(((byFinal.cancelled ?? 0) / total) * 100),
+      in_progress: round1(((byFinal.in_progress ?? 0) / total) * 100),
     },
     changeWarehouseRate: {
       overall: round1((changedWh / total) * 100),

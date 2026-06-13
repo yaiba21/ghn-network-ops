@@ -81,7 +81,7 @@ export default function StagesPage() {
               <div className="text-2xl font-semibold tabular-nums text-[var(--color-text)]">
                 {formatCompactInt(s.throughput)}
               </div>
-              <div className="text-[10px] text-[var(--color-text-muted)]">throughput / kỳ filter</div>
+              <div className="text-[10px] text-[var(--color-text-muted)]">số lượng / kỳ filter</div>
               <div className="mt-2 pt-2 border-t border-[var(--color-border-soft)] grid grid-cols-2 gap-2 text-xs">
                 <div>
                   <div className="text-[10px] uppercase text-[var(--color-text-muted)]">LT TB</div>
@@ -105,7 +105,7 @@ export default function StagesPage() {
       {/* === Breakdown table cho chặng đang chọn === */}
       <Card
         title={`Breakdown ${stages.find((s) => s.stageKey === activeStage)?.stageLabel}`}
-        subtitle="Top 50 BC/KTC theo throughput tại chặng này. Sort cột bất kỳ để tìm node bottleneck."
+        subtitle="Top 50 BC/KTC theo số lượng tại chặng này. Sort cột bất kỳ để tìm node bottleneck."
       >
         <DataTable
           columns={breakdownColumns}
@@ -139,7 +139,7 @@ const breakdownColumns: Column<ReturnType<typeof getStageBreakdown>[number]>[] =
   },
   {
     key: "throughput",
-    label: "Throughput",
+    label: "Số lượng",
     align: "right",
     sortable: true,
     sortValue: (r) => r.throughput,

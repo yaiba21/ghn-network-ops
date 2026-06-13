@@ -19,6 +19,7 @@ import type {
   FactPickup,
   FactTrip,
   FilterState,
+  FinalStatus,
   HeatmapData,
   KpiValue,
   RegionCode,
@@ -37,7 +38,7 @@ function dateInRange(iso: string, from: string, to: string): boolean {
 
 /** Filter fact_order theo geo + channel + loại BC + loại hàng + tuyến + SLA + ngày tạo. */
 function filterOrders(filter: FilterState, source = getFactOrders()): FactOrder[] {
-  const bcLoaiMap = new Map(getBcs().map((b) => [b.code, b.loaiBc]));
+  const bcMap = new Map(getBcs().map((b) => [b.code, b]));
   return source.filter((o) => {
     if (
       filter.regionCode &&
@@ -53,9 +54,13 @@ function filterOrders(filter: FilterState, source = getFactOrders()): FactOrder[
       o.channel !== filter.channelCode
     )
       return false;
-    if (filter.loaiBc && filter.loaiBc !== "all") {
-      const lbc = bcLoaiMap.get(o.bcGiaoCode);
-      if (lbc !== filter.loaiBc) return false;
+    if (filter.loaiHoatDong && filter.loaiHoatDong !== "all") {
+      const bc = bcMap.get(o.bcGiaoCode);
+      if (bc?.loaiHoatDong !== filter.loaiHoatDong) return false;
+    }
+    if (filter.loaiDichVu && filter.loaiDichVu !== "all") {
+      const bc = bcMap.get(o.bcGiaoCode);
+      if (bc?.loaiDichVu !== filter.loaiDichVu) return false;
     }
     if (
       filter.loaiHang &&
@@ -191,6 +196,24 @@ function computePctTb(orderIds: Set<string>): number {
   );
 }
 
+/**
+ * FD — Failed Delivery Rate.
+ * Tử số: số đơn có ít nhất 1 attempt GTB (giao thất bại).
+ * Mẫu số: tổng số đơn đã có ít nhất 1 attempt giao.
+ */
+function computeFailedDeliveryRate(orderIds: Set<string>): number {
+  const deliveries = getFactDeliveries().filter((d) => orderIds.has(d.orderId));
+  if (deliveries.length === 0) return 0;
+  const byOrder = new Map<string, boolean>();
+  for (const d of deliveries) {
+    if (d.outcome === "gtb") byOrder.set(d.orderId, true);
+    else if (!byOrder.has(d.orderId)) byOrder.set(d.orderId, false);
+  }
+  const total = byOrder.size;
+  const failed = Array.from(byOrder.values()).filter((v) => v).length;
+  return round1(pct(failed, total));
+}
+
 function computeFillRateKg(trips: FactTrip[]): number {
   if (trips.length === 0) return 0;
   const avg = trips.reduce((a, b) => a + b.fillRateKg, 0) / trips.length;
@@ -248,7 +271,7 @@ function computeFdRate(orderIds: Set<string>): number {
 
 function computePctReturn(orders: FactOrder[]): number {
   if (orders.length === 0) return 0;
-  return round1(pct(orders.filter((o) => o.finalStatus === "returned").length, orders.length));
+  return round1(pct(orders.filter((o) => o.finalStatus === "returned_success").length, orders.length));
 }
 
 function computePctLost(orders: FactOrder[]): number {
@@ -303,7 +326,7 @@ export type OverviewNorthStar = {
   ontimeNetwork: KpiValue;
   costPerKg: KpiValue;
   hangVeBc4Ca: KpiValue;
-  nddAchieve: KpiValue;
+  fdRate: KpiValue;
   ontimeVanTai: KpiValue;
   doiKhoOverall: KpiValue;
 };
@@ -336,7 +359,8 @@ export function getOverviewNorthStar(filter: FilterState): OverviewNorthStar {
   const ontime = computeOntimeNetwork(orders);
   const cpk = computeCostPerKg(trips);
   const hang4ca = computeHangVeBc4Ca(orders);
-  const ndd = computeNddAchieve(orders);
+  const orderIds0 = new Set(orders.map((o) => o.orderId));
+  const fd = computeFailedDeliveryRate(orderIds0);
   const ovt = computeOntimeVanTai(trips);
   const dk = computeDoiKhoOverall(orders);
 
@@ -344,7 +368,9 @@ export function getOverviewNorthStar(filter: FilterState): OverviewNorthStar {
   const sparkOntime = sparkline7Days(filter, (f) => computeOntimeNetwork(filterOrders(f)));
   const sparkCpk = sparkline7Days(filter, (f) => computeCostPerKg(filterTrips(f)));
   const sparkHang = sparkline7Days(filter, (f) => computeHangVeBc4Ca(filterOrders(f)));
-  const sparkNdd = sparkline7Days(filter, (f) => computeNddAchieve(filterOrders(f)));
+  const sparkFd = sparkline7Days(filter, (f) =>
+    computeFailedDeliveryRate(new Set(filterOrders(f).map((o) => o.orderId))),
+  );
   const sparkOvt = sparkline7Days(filter, (f) => computeOntimeVanTai(filterTrips(f)));
   const sparkDk = sparkline7Days(filter, (f) => computeDoiKhoOverall(filterOrders(f)));
 
@@ -360,7 +386,7 @@ export function getOverviewNorthStar(filter: FilterState): OverviewNorthStar {
     ontimeNetwork: buildKpi("ontimeNetwork", ontime, sparkOntime, delta(sparkOntime)),
     costPerKg: buildKpi("costPerKgNetwork", cpk, sparkCpk, delta(sparkCpk)),
     hangVeBc4Ca: buildKpi("hangVeBc4Ca", hang4ca, sparkHang, delta(sparkHang)),
-    nddAchieve: buildKpi("nddAchieve", ndd, sparkNdd, delta(sparkNdd)),
+    fdRate: buildKpi("fdRate", fd, sparkFd, delta(sparkFd)),
     ontimeVanTai: buildKpi("ontimeVanTai", ovt, sparkOvt, delta(sparkOvt)),
     doiKhoOverall: buildKpi("doiKhoOverall", dk, sparkDk, delta(sparkDk)),
   };
@@ -584,7 +610,12 @@ const HEATMAP_REGIONS: { code: RegionCode; name: string }[] = [
 
 export function getOverviewRegionHeatmap(filter: FilterState): HeatmapData {
   const regions = HEATMAP_REGIONS;
-  const cols = ["Ontime Network", "Cost/kg", "%TC"];
+  const cols = [
+    "Ontime Network",
+    "Cost/kg",
+    "% Giao thành công",
+    "Tỷ lệ đổi kho",
+  ];
 
   const cells: { row: string; col: string; value: number; status: Status }[] = [];
 
@@ -597,6 +628,7 @@ export function getOverviewRegionHeatmap(filter: FilterState): HeatmapData {
     const ontime = computeOntimeNetwork(orders);
     const cpk = computeCostPerKg(trips);
     const tc = computePctTc(orderIds);
+    const dk = computeDoiKhoOverall(orders);
 
     cells.push({
       row: r.name,
@@ -612,9 +644,15 @@ export function getOverviewRegionHeatmap(filter: FilterState): HeatmapData {
     });
     cells.push({
       row: r.name,
-      col: "%TC",
+      col: "% Giao thành công",
       value: tc,
       status: statusFromValue(KPI.pctTC, tc),
+    });
+    cells.push({
+      row: r.name,
+      col: "Tỷ lệ đổi kho",
+      value: dk,
+      status: statusFromValue(KPI.doiKhoOverall, dk),
     });
   }
 
@@ -700,11 +738,17 @@ export type PulseGaugeData = {
 export function getOverviewPulseGauges(filter: FilterState): PulseGaugeData[] {
   const trips = filterTrips(filter);
   const orders = filterOrders(filter);
+  const orderIds = new Set(orders.map((o) => o.orderId));
+  const pickups = filterPickups(filter, orderIds);
 
   const fillKg = computeFillRateKg(trips);
   const fillOrder = computeFillRateOrder(trips);
   const ontime = computeOntimeNetwork(orders);
   const ovt = computeOntimeVanTai(trips);
+  const tc = computePctTc(orderIds);
+  const ltc = computePctLtc(pickups);
+  const dk = computeDoiKhoOverall(orders);
+  const fd = computeFailedDeliveryRate(orderIds);
 
   return [
     {
@@ -735,7 +779,174 @@ export function getOverviewPulseGauges(filter: FilterState): PulseGaugeData[] {
       status: statusFromValue(KPI.ontimeVanTai, ovt),
       unit: "%",
     },
+    {
+      label: "% Giao thành công",
+      value: tc,
+      target: KPI.pctTC.target,
+      status: statusFromValue(KPI.pctTC, tc),
+      unit: "%",
+    },
+    {
+      label: "% LTC pickup",
+      value: ltc,
+      target: KPI.pctLTC.target,
+      status: statusFromValue(KPI.pctLTC, ltc),
+      unit: "%",
+    },
+    {
+      label: "% Đổi kho",
+      value: dk,
+      target: KPI.doiKhoOverall.target,
+      status: statusFromValue(KPI.doiKhoOverall, dk),
+      unit: "%",
+    },
+    {
+      label: "FD (Fail Delivery)",
+      value: fd,
+      target: KPI.fdRate.target,
+      status: statusFromValue(KPI.fdRate, fd),
+      unit: "%",
+    },
   ];
+}
+
+// =============================================================================
+// PHASE 4 — More dimensions for Tổng Quan enrichment
+// =============================================================================
+
+export type ChannelCompareRow = {
+  channel: string;
+  channelLabel: string;
+  orders: number;
+  share: number;
+  ontime: number;
+  pctTC: number;
+  doiKho: number;
+  fd: number;
+};
+
+export function getChannelComparison(filter: FilterState): ChannelCompareRow[] {
+  const orders = filterOrders(filter);
+  const total = orders.length || 1;
+  const channels: { code: string; label: string }[] = [
+    { code: "tts", label: "TTS (TikTok)" },
+    { code: "spe", label: "SPE (Shopee)" },
+    { code: "sme", label: "SME" },
+    { code: "ka", label: "KA" },
+    { code: "b2b", label: "B2B" },
+    { code: "cb", label: "Cross-border" },
+  ];
+  return channels.map((c) => {
+    const chOrders = orders.filter((o) => o.channel === c.code);
+    const ids = new Set(chOrders.map((o) => o.orderId));
+    return {
+      channel: c.code,
+      channelLabel: c.label,
+      orders: chOrders.length,
+      share: round1(pct(chOrders.length, total)),
+      ontime: computeOntimeNetwork(chOrders),
+      pctTC: computePctTc(ids),
+      doiKho: computeDoiKhoOverall(chOrders),
+      fd: computeFailedDeliveryRate(ids),
+    };
+  });
+}
+
+export type LoaiHangCompareRow = {
+  key: string;
+  label: string;
+  orders: number;
+  share: number;
+  ontime: number;
+  costPerKg: number;
+  doiKho: number;
+};
+
+export function getLoaiHangComparison(filter: FilterState): LoaiHangCompareRow[] {
+  const orders = filterOrders(filter);
+  const total = orders.length || 1;
+  const items: { key: "tieu-chuan" | "cong-kenh" | "nang"; label: string }[] = [
+    { key: "tieu-chuan", label: "Tiêu chuẩn" },
+    { key: "cong-kenh", label: "Cồng kềnh" },
+    { key: "nang", label: "Nặng" },
+  ];
+  return items.map((it) => {
+    const sub = orders.filter((o) => o.loaiHang === it.key);
+    // Estimate cost/kg per loại hàng từ tổng weight + tổng cost trip
+    const allTrips = filterTrips(filter);
+    const subWeight = sub.reduce((a, o) => a + o.weightKg, 0);
+    const tripCost = allTrips.reduce((a, b) => a + b.cost, 0);
+    const tripWeight = allTrips.reduce((a, b) => a + b.weight, 0);
+    const cpk = tripWeight > 0 ? Math.round(tripCost / tripWeight) : 0;
+    return {
+      key: it.key,
+      label: it.label,
+      orders: sub.length,
+      share: round1(pct(sub.length, total)),
+      ontime: computeOntimeNetwork(sub),
+      costPerKg: cpk + (it.key === "nang" ? 400 : it.key === "cong-kenh" ? 200 : 0), // hàng nặng đắt hơn
+      doiKho: computeDoiKhoOverall(sub),
+    };
+  });
+}
+
+export type SlaCompareRow = {
+  slaDays: number;
+  orders: number;
+  share: number;
+  ontime: number;
+  ltAvgH: number;
+};
+
+export function getSlaComparison(filter: FilterState): SlaCompareRow[] {
+  const orders = filterOrders(filter);
+  const total = orders.length || 1;
+  return [1, 2, 3].map((sla) => {
+    const sub = orders.filter((o) => o.slaDays === sla);
+    const finished = sub.filter((o) => o.deliveredTs);
+    const ltAvg =
+      finished.length > 0
+        ? finished.reduce(
+            (a, o) =>
+              a +
+              (new Date(o.deliveredTs!).getTime() -
+                new Date(o.createdTs).getTime()) /
+                3600000,
+            0,
+          ) / finished.length
+        : 0;
+    return {
+      slaDays: sla,
+      orders: sub.length,
+      share: round1(pct(sub.length, total)),
+      ontime: computeOntimeNetwork(sub),
+      ltAvgH: round1(ltAvg),
+    };
+  });
+}
+
+export type DailyTrendPoint = {
+  date: string;
+  orders: number;
+  ontime: number;
+  pctTC: number;
+  doiKho: number;
+};
+
+export function getDailyTrend(filter: FilterState, days = 14): DailyTrendPoint[] {
+  const out: DailyTrendPoint[] = [];
+  for (const day of lastNDays(days, filter.to)) {
+    const sub = filterOrders({ ...filter, from: day, to: day });
+    const ids = new Set(sub.map((o) => o.orderId));
+    out.push({
+      date: day,
+      orders: sub.length,
+      ontime: computeOntimeNetwork(sub),
+      pctTC: computePctTc(ids),
+      doiKho: computeDoiKhoOverall(sub),
+    });
+  }
+  return out;
 }
 
 
@@ -765,7 +976,7 @@ export function getJourneyStatusGroups(filter: FilterState): StatusGroupRow[] {
   const total = orders.length || 1;
   const pickup = orders.filter((o) => o.pickedTs);
   const delivered = orders.filter((o) => o.finalStatus === "delivered");
-  const returned = orders.filter((o) => o.finalStatus === "returned");
+  const returned = orders.filter((o) => o.finalStatus === "returned_success");
   const inProgress = orders.filter((o) => o.finalStatus === "in_progress");
   const lostExc = orders.filter((o) => o.finalStatus === "lost");
 
@@ -860,7 +1071,7 @@ export function getJourneyFunnel(filter: FilterState): FunnelNode[] {
   const atKtcOut = Math.round(picked * 0.985);
   const atBcGiao = Math.round(atKtcOut * 0.97);
   const delivered = orders.filter((o) => o.finalStatus === "delivered").length;
-  const returned = orders.filter((o) => o.finalStatus === "returned").length;
+  const returned = orders.filter((o) => o.finalStatus === "returned_success").length;
   const lost = orders.filter((o) => o.finalStatus === "lost").length;
   const cancelled = orders.filter((o) => o.currentState === "CANCEL").length;
 
@@ -940,53 +1151,38 @@ export function getJourneyPercentiles(filter: FilterState): PercentileRow[] {
   ];
 }
 
+/** 6 terminal states + cancelled + in_progress = 8 outcomes per spec. */
 export type FinalStatusMixRow = {
-  status: "delivered" | "returned" | "in_progress" | "lost";
+  status: FinalStatus;
   label: string;
+  icon: string;
   count: number;
   share: number;
   color: string;
+  isTerminal: boolean;
 };
 
 export function getJourneyFinalStatusMix(filter: FilterState): FinalStatusMixRow[] {
   const orders = filterOrders(filter);
   const total = orders.length || 1;
-  const counts = {
-    delivered: orders.filter((o) => o.finalStatus === "delivered").length,
-    returned: orders.filter((o) => o.finalStatus === "returned").length,
-    in_progress: orders.filter((o) => o.finalStatus === "in_progress").length,
-    lost: orders.filter((o) => o.finalStatus === "lost").length,
-  };
-  return [
-    {
-      status: "delivered",
-      label: "Giao thành công",
-      count: counts.delivered,
-      share: round1(pct(counts.delivered, total)),
-      color: "#10b981",
-    },
-    {
-      status: "returned",
-      label: "Hoàn người gửi",
-      count: counts.returned,
-      share: round1(pct(counts.returned, total)),
-      color: "#f59e0b",
-    },
-    {
-      status: "in_progress",
-      label: "Đang xử lý",
-      count: counts.in_progress,
-      share: round1(pct(counts.in_progress, total)),
-      color: "#6b7280",
-    },
-    {
-      status: "lost",
-      label: "Thất lạc / hư hỏng",
-      count: counts.lost,
-      share: round1(pct(counts.lost, total)),
-      color: "#ef4444",
-    },
+  const cfg: { status: FinalStatus; label: string; icon: string; color: string; isTerminal: boolean }[] = [
+    { status: "delivered", label: "Giao thành công", icon: "✓", color: "#10b981", isTerminal: true },
+    { status: "delivery_failed", label: "Giao thất bại", icon: "✗", color: "#dc2626", isTerminal: true },
+    { status: "returned_success", label: "Trả thành công", icon: "↩", color: "#f59e0b", isTerminal: true },
+    { status: "returned_failed", label: "Trả thất bại", icon: "↩✗", color: "#b91c1c", isTerminal: true },
+    { status: "exception", label: "Exception", icon: "⚠", color: "#a855f7", isTerminal: true },
+    { status: "lost", label: "Thất lạc", icon: "✗", color: "#ef4444", isTerminal: true },
+    { status: "cancelled", label: "Huỷ", icon: "✗", color: "#6b7280", isTerminal: true },
+    { status: "in_progress", label: "Đang xử lý", icon: "⋯", color: "#9ca3af", isTerminal: false },
   ];
+  return cfg.map((c) => {
+    const count = orders.filter((o) => o.finalStatus === c.status).length;
+    return {
+      ...c,
+      count,
+      share: round1(pct(count, total)),
+    };
+  });
 }
 
 export type JourneyOrderRow = {
@@ -1044,7 +1240,7 @@ export function getStageOverview(filter: FilterState): StageMetricCard[] {
   const total = orders.length || 1;
   const picked = orders.filter((o) => o.pickedTs);
   const delivered = orders.filter((o) => o.finalStatus === "delivered");
-  const returned = orders.filter((o) => o.finalStatus === "returned");
+  const returned = orders.filter((o) => o.finalStatus === "returned_success");
 
   const ltPick =
     picked.length > 0

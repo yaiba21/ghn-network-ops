@@ -3,11 +3,15 @@
 import { useMemo } from "react";
 import { useFilter } from "@/components/filter/FilterContext";
 import {
+  getChannelComparison,
+  getDailyTrend,
+  getLoaiHangComparison,
   getOverviewAlerts,
   getOverviewModuleHealth,
   getOverviewNorthStar,
   getOverviewPulseGauges,
   getOverviewRegionHeatmap,
+  getSlaComparison,
 } from "@/lib/aggregators";
 import { dataUpdatedAt } from "@/lib/mock-data";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -18,7 +22,15 @@ import { KpiCardFrom } from "@/components/ui/KpiCard";
 import { ModuleHealthCard } from "@/components/ui/ModuleHealthCard";
 import { PulseGauge } from "@/components/ui/PulseGauge";
 import { Heatmap } from "@/components/ui/Heatmap";
-import { formatVND, formatPct } from "@/lib/utils";
+import { MetricChart } from "@/components/ui/MetricChart";
+import { DataTable, type Column } from "@/components/ui/DataTable";
+import {
+  formatCompactInt,
+  formatHours,
+  formatPct,
+  formatVND,
+  shortDate,
+} from "@/lib/utils";
 
 export default function OverallPage() {
   const { filter } = useFilter();
@@ -28,6 +40,10 @@ export default function OverallPage() {
   const heatmap = useMemo(() => getOverviewRegionHeatmap(filter), [filter]);
   const alerts = useMemo(() => getOverviewAlerts(filter), [filter]);
   const gauges = useMemo(() => getOverviewPulseGauges(filter), [filter]);
+  const channels = useMemo(() => getChannelComparison(filter), [filter]);
+  const loaiHangs = useMemo(() => getLoaiHangComparison(filter), [filter]);
+  const slas = useMemo(() => getSlaComparison(filter), [filter]);
+  const trend = useMemo(() => getDailyTrend(filter, 14), [filter]);
   const updated = dataUpdatedAt();
 
   return (
@@ -35,7 +51,7 @@ export default function OverallPage() {
       <PageHeader
         breadcrumb={[{ label: "GHN Network Ops" }, { label: "Tổng Quan" }]}
         title="Tổng Quan — Sức khoẻ vận hành mạng"
-        subtitle="6 chỉ số chiến lược · 5 mô-đun nghiệp vụ · so sánh 3 vùng. Click ô đỏ để drill xuống trang chi tiết."
+        subtitle="Các chỉ số chiến lược của GHN."
         updatedAt={updated}
       />
 
@@ -44,9 +60,9 @@ export default function OverallPage() {
           region: true,
           province: true,
           channel: true,
-          loaiBc: true,
-          ca: true,
+          loaiHoatDong: true,
           loaiHang: true,
+          loaiDichVu: true,
           loaiTuyen: true,
           slaDays: true,
           granularity: true,
@@ -64,32 +80,33 @@ export default function OverallPage() {
           <KpiCardFrom kpi={northStar.ontimeNetwork} size="sm" />
           <KpiCardFrom kpi={northStar.costPerKg} size="sm" />
           <KpiCardFrom kpi={northStar.hangVeBc4Ca} size="sm" />
-          <KpiCardFrom kpi={northStar.nddAchieve} size="sm" />
+          <KpiCardFrom kpi={northStar.fdRate} size="sm" />
           <KpiCardFrom kpi={northStar.ontimeVanTai} size="sm" />
           <KpiCardFrom kpi={northStar.doiKhoOverall} size="sm" />
         </div>
       </section>
 
-      {/* === 5 mô-đun nghiệp vụ + Pulse Gauges === */}
+      {/* === Module health + Pulse gauges === */}
       <section className="grid grid-cols-1 xl:grid-cols-3 gap-3">
         <div className="xl:col-span-2">
           <div className="text-[11px] uppercase tracking-wide text-[var(--color-text-muted)] mb-2">
             Sức khoẻ theo mô-đun (click drill xuống trang chi tiết)
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+            {/* Last Mile xếp cuối theo flow đơn */}
             <ModuleHealthCard module={modules[0]} href="/stages#first-mile" />
             <ModuleHealthCard module={modules[1]} href="/network" />
-            <ModuleHealthCard module={modules[2]} href="/stages#last-mile" />
             <ModuleHealthCard module={modules[3]} href="/routing" />
             <ModuleHealthCard module={modules[4]} href="/transport" />
+            <ModuleHealthCard module={modules[2]} href="/stages#last-mile" />
           </div>
         </div>
         <div>
           <div className="text-[11px] uppercase tracking-wide text-[var(--color-text-muted)] mb-2">
-            Pulse realtime
+            Pulse realtime ({gauges.length} chỉ số)
           </div>
           <Card>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               {gauges.map((g) => (
                 <PulseGauge key={g.label} data={g} />
               ))}
@@ -98,10 +115,62 @@ export default function OverallPage() {
         </div>
       </section>
 
-      {/* === Heatmap 3 vùng × 3 metric === */}
+      {/* === Trend 14 ngày === */}
       <Card
-        title="So sánh 3 vùng × 3 chỉ số"
-        subtitle="Heatmap màu theo ngưỡng đèn giao thông. Click vào ô để drill xuống vùng đó."
+        title="Trend 14 ngày — sản lượng + Ontime + %TC + Đổi kho"
+        subtitle="Xu hướng theo ngày. Spike volume thường kèm drop Ontime — kiểm tra ca/lane cụ thể."
+      >
+        <MetricChart
+          type="combo"
+          data={trend}
+          xKey="date"
+          height={260}
+          series={[
+            {
+              key: "orders",
+              label: "Sản lượng (đơn)",
+              type: "bar",
+              color: "#F97316",
+              yAxisId: "left",
+            },
+            {
+              key: "ontime",
+              label: "Ontime Network %",
+              type: "line",
+              color: "#10b981",
+              yAxisId: "right",
+            },
+            {
+              key: "pctTC",
+              label: "%TC",
+              type: "line",
+              color: "#1F2937",
+              yAxisId: "right",
+            },
+            {
+              key: "doiKho",
+              label: "% Đổi kho",
+              type: "line",
+              color: "#DC2626",
+              yAxisId: "right",
+            },
+          ]}
+          xTickFormatter={(d) => shortDate(String(d))}
+          yTickFormatter={(v) => formatCompactInt(v)}
+          rightYTickFormatter={(v) => `${v.toFixed(1)}%`}
+          legend
+          tooltipValueFormatter={(v, name) =>
+            String(name).includes("%") || String(name).includes("Ontime")
+              ? `${v.toFixed(2)}%`
+              : formatCompactInt(v)
+          }
+        />
+      </Card>
+
+      {/* === Heatmap 14 vùng × 4 cột === */}
+      <Card
+        title={`So sánh ${heatmap.rows.length} vùng × ${heatmap.cols.length} chỉ số`}
+        subtitle="Heatmap màu theo ngưỡng đèn giao thông (xanh / vàng / đỏ). Click ô để drill."
         actions={
           <div className="text-[10px] uppercase tracking-wide text-[var(--color-text-muted)]">
             [MẪU per-vùng — chờ data thật]
@@ -118,6 +187,203 @@ export default function OverallPage() {
           }}
         />
       </Card>
+
+      {/* === So sánh theo channel + loại hàng === */}
+      <section className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+        <Card
+          title="So sánh theo nguồn đơn (Channel)"
+          subtitle="6 channel: TTS / SPE / SME / KA / B2B / CB. Theo dõi channel nào đang underperform."
+        >
+          <DataTable
+            columns={channelColumns}
+            data={channels}
+            rowKey={(r) => r.channel}
+          />
+        </Card>
+
+        <Card
+          title="So sánh theo loại hàng"
+          subtitle="Tiêu chuẩn / Cồng kềnh / Nặng — chi phí + thời gian khác nhau đáng kể."
+        >
+          <DataTable
+            columns={loaiHangColumns}
+            data={loaiHangs}
+            rowKey={(r) => r.key}
+          />
+        </Card>
+      </section>
+
+      {/* === So sánh theo SLA === */}
+      <Card
+        title="So sánh theo SLA days (1 / 2 / 3 ngày)"
+        subtitle="SLA 1 ngày khắt khe nhất — NDD. Đo lead time TB vs ontime per SLA bucket."
+      >
+        <DataTable columns={slaColumns} data={slas} rowKey={(r) => String(r.slaDays)} />
+      </Card>
     </div>
   );
 }
+
+// =============================================================================
+// Columns
+// =============================================================================
+
+const channelColumns: Column<
+  ReturnType<typeof getChannelComparison>[number]
+>[] = [
+  { key: "channelLabel", label: "Channel", render: (r) => <span className="font-medium">{r.channelLabel}</span> },
+  {
+    key: "orders",
+    label: "Sản lượng",
+    align: "right",
+    sortable: true,
+    sortValue: (r) => r.orders,
+    render: (r) => formatCompactInt(r.orders),
+  },
+  {
+    key: "share",
+    label: "Share",
+    align: "right",
+    sortable: true,
+    sortValue: (r) => r.share,
+    render: (r) => formatPct(r.share, 1),
+  },
+  {
+    key: "ontime",
+    label: "Ontime",
+    align: "right",
+    sortable: true,
+    sortValue: (r) => r.ontime,
+    render: (r) => (
+      <span
+        className={
+          r.ontime >= 90 ? "text-emerald-600" : r.ontime >= 88 ? "text-amber-600" : "text-red-600"
+        }
+      >
+        {formatPct(r.ontime, 1)}
+      </span>
+    ),
+  },
+  {
+    key: "pctTC",
+    label: "%TC",
+    align: "right",
+    sortable: true,
+    sortValue: (r) => r.pctTC,
+    render: (r) => formatPct(r.pctTC, 1),
+  },
+  {
+    key: "fd",
+    label: "FD",
+    align: "right",
+    sortable: true,
+    sortValue: (r) => r.fd,
+    render: (r) => (
+      <span className={r.fd <= 5 ? "text-emerald-600" : r.fd <= 10 ? "text-amber-600" : "text-red-600"}>
+        {formatPct(r.fd, 1)}
+      </span>
+    ),
+  },
+  {
+    key: "doiKho",
+    label: "% Đổi kho",
+    align: "right",
+    sortable: true,
+    sortValue: (r) => r.doiKho,
+    render: (r) => (
+      <span className={r.doiKho <= 1.5 ? "text-emerald-600" : r.doiKho <= 2.3 ? "text-amber-600" : "text-red-600"}>
+        {formatPct(r.doiKho, 1)}
+      </span>
+    ),
+  },
+];
+
+const loaiHangColumns: Column<
+  ReturnType<typeof getLoaiHangComparison>[number]
+>[] = [
+  { key: "label", label: "Loại hàng", render: (r) => <span className="font-medium">{r.label}</span> },
+  {
+    key: "orders",
+    label: "Sản lượng",
+    align: "right",
+    sortable: true,
+    sortValue: (r) => r.orders,
+    render: (r) => formatCompactInt(r.orders),
+  },
+  {
+    key: "share",
+    label: "Share",
+    align: "right",
+    sortable: true,
+    sortValue: (r) => r.share,
+    render: (r) => formatPct(r.share, 1),
+  },
+  {
+    key: "ontime",
+    label: "Ontime",
+    align: "right",
+    sortable: true,
+    sortValue: (r) => r.ontime,
+    render: (r) => formatPct(r.ontime, 1),
+  },
+  {
+    key: "costPerKg",
+    label: "Cost/kg ước lượng",
+    align: "right",
+    sortable: true,
+    sortValue: (r) => r.costPerKg,
+    render: (r) => formatVND(r.costPerKg),
+  },
+  {
+    key: "doiKho",
+    label: "% Đổi kho",
+    align: "right",
+    sortable: true,
+    sortValue: (r) => r.doiKho,
+    render: (r) => formatPct(r.doiKho, 1),
+  },
+];
+
+const slaColumns: Column<ReturnType<typeof getSlaComparison>[number]>[] = [
+  {
+    key: "slaDays",
+    label: "SLA",
+    render: (r) => <span className="font-medium">{r.slaDays} ngày</span>,
+  },
+  {
+    key: "orders",
+    label: "Sản lượng",
+    align: "right",
+    sortable: true,
+    sortValue: (r) => r.orders,
+    render: (r) => formatCompactInt(r.orders),
+  },
+  {
+    key: "share",
+    label: "Share",
+    align: "right",
+    sortable: true,
+    sortValue: (r) => r.share,
+    render: (r) => formatPct(r.share, 1),
+  },
+  {
+    key: "ontime",
+    label: "Ontime",
+    align: "right",
+    sortable: true,
+    sortValue: (r) => r.ontime,
+    render: (r) => (
+      <span className={r.ontime >= 90 ? "text-emerald-600" : r.ontime >= 85 ? "text-amber-600" : "text-red-600"}>
+        {formatPct(r.ontime, 1)}
+      </span>
+    ),
+  },
+  {
+    key: "ltAvgH",
+    label: "Lead time TB",
+    align: "right",
+    sortable: true,
+    sortValue: (r) => r.ltAvgH,
+    render: (r) => formatHours(r.ltAvgH),
+  },
+];

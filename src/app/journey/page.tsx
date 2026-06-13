@@ -4,7 +4,6 @@ import { useMemo } from "react";
 import { useFilter } from "@/components/filter/FilterContext";
 import {
   getJourneyFinalStatusMix,
-  getJourneyFunnel,
   getJourneyPercentiles,
   getJourneyStatusGroups,
   getJourneyTopOrders,
@@ -14,27 +13,31 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { FilterBar } from "@/components/filter/FilterBar";
 import { Card } from "@/components/ui/Card";
 import { DataTable, type Column } from "@/components/ui/DataTable";
-import { Donut } from "@/components/ui/Donut";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { cn, formatCompactInt, formatPct, formatVND, formatVNDate, formatHours } from "@/lib/utils";
-import { CHANNEL_LABEL_VI, LOAI_HANG_LABEL_VI, type ChannelCode, type LoaiHang } from "@/lib/types";
+import {
+  cn,
+  formatCompactInt,
+  formatHours,
+  formatInt,
+  formatPct,
+  formatVNDate,
+} from "@/lib/utils";
+import {
+  CHANNEL_LABEL_VI,
+  FINAL_STATUS_LABEL_VI,
+  LOAI_HANG_LABEL_VI,
+  type ChannelCode,
+  type LoaiHang,
+} from "@/lib/types";
 
 export default function JourneyPage() {
   const { filter } = useFilter();
 
-  const funnel = useMemo(() => getJourneyFunnel(filter), [filter]);
   const groups = useMemo(() => getJourneyStatusGroups(filter), [filter]);
   const percentiles = useMemo(() => getJourneyPercentiles(filter), [filter]);
   const finalMix = useMemo(() => getJourneyFinalStatusMix(filter), [filter]);
   const topOrders = useMemo(() => getJourneyTopOrders(filter, 30), [filter]);
   const updated = dataUpdatedAt();
 
-  const finalMixSlices = finalMix.map((m) => ({
-    key: m.status,
-    label: m.label,
-    value: m.count,
-    color: m.color,
-  }));
   const totalOrders = finalMix.reduce((a, b) => a + b.count, 0);
 
   return (
@@ -45,7 +48,7 @@ export default function JourneyPage() {
           { label: "Hành Trình Đơn Hàng" },
         ]}
         title="Hành Trình Đơn Hàng — theo trạng thái"
-        subtitle="6 nhóm trạng thái từ tạo đơn đến giao thành công (hoặc hoàn). Funnel + percentile lead time + drill xuống MVĐ."
+        subtitle="6 nhóm trạng thái từ tạo đơn đến giao thành công (hoặc hoàn / huỷ / thất lạc). Lead time percentile heatmap + drill xuống MVĐ."
         updatedAt={updated}
       />
 
@@ -60,64 +63,29 @@ export default function JourneyPage() {
         }}
       />
 
-      {/* === Funnel theo trạng thái === */}
+      {/* === Stage flow gom funnel + 6 nhóm === */}
       <Card
-        title="Funnel trạng thái — từ tạo đơn → terminal"
-        subtitle="Hồ phễu các mốc chính trong đời đơn. Nhánh thất bại (Huỷ / Thất lạc) tô đỏ."
+        title={`Hành trình đơn — ${formatCompactInt(totalOrders)} đơn qua 6 chặng`}
+        subtitle="Mỗi chặng: số lượng · % pass · LT TB · # fail. Đơn rớt khỏi flow đi xuống ô outcome bên dưới."
       >
-        <FunnelChart funnel={funnel} />
+        <StageFlowVisualization groups={groups} totalOrders={totalOrders} />
       </Card>
 
-      {/* === 6 nhóm trạng thái table === */}
+      {/* === 8 outcome card (6 terminal + cancelled + in_progress) === */}
       <Card
-        title="6 nhóm trạng thái — chỉ số chi tiết"
-        subtitle="Throughput · Tỷ lệ thành công · Lead time trung bình · Số đơn fail."
+        title="8 outcome cuối — 6 terminal + 2 trạng thái khác"
+        subtitle="Phân bổ kết quả cuối cùng của đơn. Đỏ = exception/lost/failed → cần investigate."
       >
-        <StatusGroupTable rows={groups} />
+        <FinalStatusGrid mix={finalMix} />
       </Card>
 
-      {/* === Percentile + Final status mix === */}
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
-        <div className="xl:col-span-2">
-          <Card
-            title="Percentile Lead Time — P50 / P90 / P99"
-            subtitle="Time 1 (scan đơn đầu) · Time 2 (kết thúc phiên) · Lead time E2E."
-          >
-            <PercentileTable rows={percentiles} />
-          </Card>
-        </div>
-        <Card
-          title="Mix trạng thái cuối"
-          subtitle={`Tổng ${formatCompactInt(totalOrders)} đơn — phân phối final_status.`}
-        >
-          <Donut
-            data={finalMixSlices}
-            height={200}
-            innerRadius={50}
-            outerRadius={80}
-            valueFormatter={(v) => `${formatCompactInt(v)} đơn`}
-            centerLabel={
-              <>
-                <div className="text-[10px] uppercase text-[var(--color-text-muted)]">Tổng</div>
-                <div className="text-base font-semibold tabular-nums">
-                  {formatCompactInt(totalOrders)}
-                </div>
-              </>
-            }
-          />
-          <ul className="mt-3 space-y-1.5">
-            {finalMix.map((m) => (
-              <li key={m.status} className="flex items-center justify-between text-xs">
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: m.color }} />
-                  <span>{m.label}</span>
-                </div>
-                <span className="font-semibold tabular-nums">{formatPct(m.share, 1)}</span>
-              </li>
-            ))}
-          </ul>
-        </Card>
-      </div>
+      {/* === Percentile heatmap === */}
+      <Card
+        title="Lead Time Percentile — Heatmap"
+        subtitle="P50 (50% đơn dưới giá trị này) · P90 · P99. Cell màu đỏ = vượt ngưỡng cảnh báo."
+      >
+        <PercentileHeatmap rows={percentiles} />
+      </Card>
 
       {/* === Drill MVĐ === */}
       <OrdersDrillTable rows={topOrders} />
@@ -126,156 +94,245 @@ export default function JourneyPage() {
 }
 
 // =============================================================================
-// Sub-components
+// Stage flow visualization — combined funnel + 6 group table
 // =============================================================================
 
-function FunnelChart({ funnel }: { funnel: ReturnType<typeof getJourneyFunnel> }) {
-  const max = Math.max(...funnel.map((n) => n.count));
+const STAGE_TONE: Record<string, string> = {
+  tao: "bg-slate-100",
+  lay: "bg-emerald-50",
+  "ktc-di": "bg-violet-50",
+  giao: "bg-amber-50",
+  "ktc-ve": "bg-sky-50",
+  tra: "bg-rose-50",
+};
+
+const STAGE_ACCENT: Record<string, string> = {
+  tao: "bg-slate-500",
+  lay: "bg-emerald-500",
+  "ktc-di": "bg-violet-500",
+  giao: "bg-amber-500",
+  "ktc-ve": "bg-sky-500",
+  tra: "bg-rose-500",
+};
+
+function StageFlowVisualization({
+  groups,
+  totalOrders,
+}: {
+  groups: ReturnType<typeof getJourneyStatusGroups>;
+  totalOrders: number;
+}) {
   return (
-    <div className="space-y-1.5">
-      {funnel.map((n) => {
-        const widthPct = max === 0 ? 0 : (n.count / max) * 100;
-        const color = n.isFail
-          ? "#ef4444"
-          : n.isTerminal
-            ? "#10b981"
-            : "#1F2937";
-        const textColor = n.isFail
-          ? "text-red-700"
-          : n.isTerminal
-            ? "text-emerald-700"
-            : "text-[var(--color-text)]";
-        return (
-          <div key={n.key} className="flex items-center gap-2">
-            <div className="w-32 shrink-0 text-xs truncate">{n.label}</div>
-            <div className="flex-1 relative h-7 bg-[var(--color-hover)] rounded">
-              <div
-                className="absolute left-0 top-0 bottom-0 rounded transition-[width] duration-300"
-                style={{ width: `${widthPct}%`, backgroundColor: color }}
-              />
-              <div
-                className={cn(
-                  "absolute left-2 top-0 bottom-0 flex items-center text-xs font-medium tabular-nums",
-                  widthPct > 25 ? "text-white" : textColor,
-                )}
-              >
-                {formatCompactInt(n.count)}
+    <div className="overflow-x-auto">
+      <div className="flex items-stretch gap-2 min-w-[900px]">
+        {groups.map((g, idx) => {
+          const widthPct = totalOrders > 0 ? (g.total / totalOrders) * 100 : 0;
+          const dropPct = idx > 0 ? 100 - g.successRate : 0;
+          return (
+            <div
+              key={g.groupKey}
+              className={cn(
+                "flex-1 border rounded-md overflow-hidden",
+                STAGE_TONE[g.groupKey] ?? "bg-slate-50",
+              )}
+            >
+              <div className={cn("h-1", STAGE_ACCENT[g.groupKey] ?? "bg-slate-500")} />
+              <div className="p-3 space-y-2">
+                <div className="text-xs font-semibold text-[var(--color-text)]">
+                  {g.groupLabel}
+                </div>
+                {/* Volume bar */}
+                <div>
+                  <div className="text-2xl font-semibold tabular-nums text-[var(--color-text)]">
+                    {formatCompactInt(g.total)}
+                  </div>
+                  <div className="h-1.5 bg-[var(--color-hover)] rounded-full overflow-hidden mt-1">
+                    <div
+                      className={cn(
+                        "h-full",
+                        STAGE_ACCENT[g.groupKey] ?? "bg-slate-500",
+                      )}
+                      style={{ width: `${widthPct}%` }}
+                    />
+                  </div>
+                </div>
+                {/* Metrics */}
+                <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-[11px]">
+                  <div>
+                    <div className="text-[10px] uppercase text-[var(--color-text-muted)]">
+                      % Pass
+                    </div>
+                    <div
+                      className={cn(
+                        "tabular-nums font-medium",
+                        g.successRate >= 92
+                          ? "text-emerald-700"
+                          : g.successRate >= 85
+                            ? "text-amber-700"
+                            : "text-red-700",
+                      )}
+                    >
+                      {formatPct(g.successRate, 1)}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] uppercase text-[var(--color-text-muted)]">
+                      LT TB
+                    </div>
+                    <div className="tabular-nums font-medium">
+                      {g.avgLeadtimeH > 0 ? formatHours(g.avgLeadtimeH) : "—"}
+                    </div>
+                  </div>
+                  {idx > 0 && (
+                    <div className="col-span-2">
+                      <div className="text-[10px] uppercase text-[var(--color-text-muted)]">
+                        Drop-off
+                      </div>
+                      <div
+                        className={cn(
+                          "tabular-nums",
+                          dropPct <= 5
+                            ? "text-emerald-700"
+                            : dropPct <= 12
+                              ? "text-amber-700"
+                              : "text-red-700",
+                        )}
+                      >
+                        {formatCompactInt(g.failCount)} đơn · {formatPct(dropPct, 1)}
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
-            <div className={cn("w-20 shrink-0 text-right text-xs tabular-nums", textColor)}>
-              {formatPct((n.count / Math.max(1, funnel[0].count)) * 100, 1)}
-            </div>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
+      <div className="text-[10px] text-[var(--color-text-muted)] mt-2">
+        Mỗi cột = 1 chặng. Cao = throughput cao. Đọc trái-phải theo flow đơn.
+      </div>
     </div>
   );
 }
 
-function StatusGroupTable({ rows }: { rows: ReturnType<typeof getJourneyStatusGroups> }) {
-  const cols: Column<ReturnType<typeof getJourneyStatusGroups>[number]>[] = [
-    {
-      key: "groupLabel",
-      label: "Nhóm trạng thái",
-      render: (r) => <span className="font-medium">{r.groupLabel}</span>,
-    },
-    {
-      key: "total",
-      label: "Throughput",
-      align: "right",
-      sortable: true,
-      sortValue: (r) => r.total,
-      render: (r) => formatCompactInt(r.total) + " đơn",
-    },
-    {
-      key: "successRate",
-      label: "Tỷ lệ thành công",
-      align: "right",
-      sortable: true,
-      sortValue: (r) => r.successRate,
-      render: (r) => (
-        <span
-          className={
-            r.successRate >= 92
-              ? "text-emerald-600"
-              : r.successRate >= 85
-                ? "text-amber-600"
-                : "text-red-600"
-          }
-        >
-          {formatPct(r.successRate, 1)}
-        </span>
-      ),
-    },
-    {
-      key: "avgLeadtimeH",
-      label: "Lead time TB",
-      align: "right",
-      sortable: true,
-      sortValue: (r) => r.avgLeadtimeH,
-      render: (r) => formatHours(r.avgLeadtimeH),
-    },
-    {
-      key: "failCount",
-      label: "Đơn fail",
-      align: "right",
-      sortable: true,
-      sortValue: (r) => r.failCount,
-      render: (r) => formatCompactInt(r.failCount),
-    },
-  ];
+// =============================================================================
+// 8 final status grid
+// =============================================================================
+
+function FinalStatusGrid({
+  mix,
+}: {
+  mix: ReturnType<typeof getJourneyFinalStatusMix>;
+}) {
+  // Sort: terminal trước, in_progress cuối
+  const sorted = mix
+    .slice()
+    .sort((a, b) => (a.isTerminal === b.isTerminal ? 0 : a.isTerminal ? -1 : 1));
   return (
-    <DataTable
-      columns={cols}
-      data={rows}
-      rowKey={(r) => r.groupKey}
-    />
+    <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
+      {sorted.map((m) => (
+        <div
+          key={m.status}
+          className="border border-[var(--color-border)] rounded-md p-3 bg-white"
+          style={{ borderLeftWidth: 4, borderLeftColor: m.color }}
+        >
+          <div className="flex items-center gap-1.5">
+            <span className="text-base" style={{ color: m.color }}>
+              {m.icon}
+            </span>
+            <span className="text-[11px] text-[var(--color-text-muted)] truncate">
+              {m.label}
+            </span>
+          </div>
+          <div className="mt-1 text-xl font-semibold tabular-nums text-[var(--color-text)]">
+            {formatPct(m.share, 1)}
+          </div>
+          <div className="text-[10px] text-[var(--color-text-muted)] tabular-nums">
+            {formatCompactInt(m.count)} đơn
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
 
-function PercentileTable({ rows }: { rows: ReturnType<typeof getJourneyPercentiles> }) {
+// =============================================================================
+// Percentile heatmap
+// =============================================================================
+
+function PercentileHeatmap({
+  rows,
+}: {
+  rows: ReturnType<typeof getJourneyPercentiles>;
+}) {
+  // Ngưỡng đèn giao thông cho mỗi metric (phút hoặc h).
+  const thresholds: Record<string, { green: number; amber: number; unit: string }> = {
+    "Time 1 (scan đơn đầu)": { green: 15, amber: 25, unit: "'" },
+    "Time 2 (kết thúc phiên)": { green: 20, amber: 30, unit: "'" },
+    "Lead time E2E": { green: 36, amber: 60, unit: "h" },
+  };
+
+  const cellColor = (value: number, threshold: { green: number; amber: number }) => {
+    if (value <= threshold.green)
+      return "bg-emerald-100 text-emerald-900 border-emerald-200";
+    if (value <= threshold.amber)
+      return "bg-amber-100 text-amber-900 border-amber-200";
+    return "bg-red-100 text-red-900 border-red-200";
+  };
+
   return (
-    <div className="border border-[var(--color-border)] rounded-md overflow-hidden">
-      <table className="w-full text-sm">
-        <thead className="bg-[var(--color-table-head)]">
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm border-separate border-spacing-1">
+        <thead>
           <tr>
-            <th className="text-left px-4 py-2 text-xs uppercase tracking-wide text-[var(--color-text-muted)] font-medium">
+            <th className="text-left text-[11px] uppercase tracking-wide text-[var(--color-text-muted)] font-medium px-2 py-1">
               Chỉ số
             </th>
-            <th className="text-right px-4 py-2 text-xs uppercase tracking-wide text-[var(--color-text-muted)] font-medium">
-              P50
-            </th>
-            <th className="text-right px-4 py-2 text-xs uppercase tracking-wide text-[var(--color-text-muted)] font-medium">
-              P90
-            </th>
-            <th className="text-right px-4 py-2 text-xs uppercase tracking-wide text-[var(--color-text-muted)] font-medium">
-              P99
-            </th>
+            {(["P50", "P90", "P99"] as const).map((p) => (
+              <th
+                key={p}
+                className="text-center text-[11px] uppercase tracking-wide text-[var(--color-text-muted)] font-medium px-2 py-1"
+              >
+                {p}
+              </th>
+            ))}
           </tr>
         </thead>
         <tbody>
-          {rows.map((r) => (
-            <tr key={r.metric} className="border-t border-[var(--color-border-soft)]">
-              <td className="px-4 py-2.5">{r.metric}</td>
-              <td className="px-4 py-2.5 text-right tabular-nums font-semibold">
-                {r.p50}
-                {r.unit === "h" ? "h" : "'"}
-              </td>
-              <td className="px-4 py-2.5 text-right tabular-nums">
-                {r.p90}
-                {r.unit === "h" ? "h" : "'"}
-              </td>
-              <td className="px-4 py-2.5 text-right tabular-nums">
-                {r.p99}
-                {r.unit === "h" ? "h" : "'"}
-              </td>
-            </tr>
-          ))}
+          {rows.map((r) => {
+            const t = thresholds[r.metric] ?? { green: 999, amber: 9999, unit: r.unit };
+            return (
+              <tr key={r.metric}>
+                <td className="px-2 py-2 text-sm font-medium">{r.metric}</td>
+                {[r.p50, r.p90, r.p99].map((v, i) => (
+                  <td
+                    key={i}
+                    className={cn(
+                      "px-3 py-2 text-center tabular-nums font-semibold border rounded",
+                      cellColor(v, t),
+                    )}
+                  >
+                    {formatInt(v)}
+                    {r.unit === "h" ? "h" : "'"}
+                  </td>
+                ))}
+              </tr>
+            );
+          })}
         </tbody>
       </table>
+      <div className="text-[10px] text-[var(--color-text-muted)] mt-2 flex gap-3">
+        <span><span className="inline-block w-2 h-2 bg-emerald-500 rounded mr-1" />Đạt mục tiêu</span>
+        <span><span className="inline-block w-2 h-2 bg-amber-500 rounded mr-1" />Cảnh báo</span>
+        <span><span className="inline-block w-2 h-2 bg-red-500 rounded mr-1" />Vượt ngưỡng</span>
+      </div>
     </div>
   );
 }
+
+// =============================================================================
+// Drill MVĐ table
+// =============================================================================
 
 function OrdersDrillTable({
   rows,
@@ -323,15 +380,25 @@ function OrdersDrillTable({
       key: "finalStatus",
       label: "Kết quả",
       render: (r) => {
-        const status =
+        const label = FINAL_STATUS_LABEL_VI[r.finalStatus as keyof typeof FINAL_STATUS_LABEL_VI];
+        const color =
           r.finalStatus === "delivered"
-            ? "green"
-            : r.finalStatus === "returned"
-              ? "amber"
-              : r.finalStatus === "lost"
-                ? "red"
-                : "amber";
-        return <StatusBadge status={status} label={r.finalStatus} />;
+            ? "bg-emerald-100 text-emerald-800 border-emerald-200"
+            : r.finalStatus === "in_progress"
+              ? "bg-gray-100 text-gray-800 border-gray-200"
+              : r.finalStatus.includes("returned")
+                ? "bg-amber-100 text-amber-800 border-amber-200"
+                : "bg-red-100 text-red-800 border-red-200";
+        return (
+          <span
+            className={cn(
+              "inline-block px-2 py-0.5 text-xs font-medium border rounded",
+              color,
+            )}
+          >
+            {label ?? r.finalStatus}
+          </span>
+        );
       },
     },
     {

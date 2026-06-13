@@ -82,7 +82,7 @@ export function JourneyFlow({ stages, className }: Props) {
               {formatPct(s.successRate)}
             </div>
             <div className="text-[11px] text-[var(--color-text-muted)] mt-1 tabular-nums">
-              ~{formatCompactInt(s.throughput)} đơn/ngày
+              ~{formatCompactInt(s.throughput)} đơn/ngày (số lượng)
             </div>
           </a>
           {i < stages.length - 1 && (
