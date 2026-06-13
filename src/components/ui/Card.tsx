@@ -27,7 +27,8 @@ export function Card({
   return (
     <div
       className={cn(
-        "border border-[var(--color-border)] rounded-md bg-white flex flex-col",
+        "border border-[var(--color-border)] rounded-md bg-white flex flex-col ghn-fade-in",
+        "transition-shadow hover:shadow-sm",
         className,
       )}
     >

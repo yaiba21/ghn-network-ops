@@ -9,6 +9,7 @@ import {
   getTransportByCarrier,
   getTransportByRouteType,
   getTransportKpis,
+  getTransportMap,
   getTransportTrips,
 } from "@/lib/aggregators";
 import { dataUpdatedAt } from "@/lib/mock-data";
@@ -16,6 +17,7 @@ import { KPI, statusFromValue } from "@/lib/kpi-config";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { FilterBar } from "@/components/filter/FilterBar";
 import { AlertBanner } from "@/components/ui/AlertBanner";
+import { VietnamMap } from "@/components/ui/VietnamMap";
 import { DimensionSelect } from "@/components/filter/DimensionSelect";
 import { Card } from "@/components/ui/Card";
 import { DataTable, type Column } from "@/components/ui/DataTable";
@@ -38,6 +40,7 @@ export default function TransportPage() {
   const routeTypes = useMemo(() => getTransportByRouteType(filter), [filter]);
   const laneHealth = useMemo(() => getLaneHealth(filter, 30), [filter]);
   const laneOpts = useMemo(() => getLaneCodesForFilter(filter), [filter]);
+  const map = useMemo(() => getTransportMap(filter, 14), [filter]);
   const alerts = useMemo(() => getTransportAlerts(filter), [filter]);
   const updated = dataUpdatedAt();
 
@@ -94,6 +97,14 @@ export default function TransportPage() {
         <KpiCard label="Leadtime gán" value={kpis.leadtimeGanH} unit="h" deltaPct={0} status={kpis.leadtimeGanH <= 2 ? "green" : kpis.leadtimeGanH <= 3 ? "amber" : "red"} direction="lower-better" target={1.5} size="sm" />
         <KpiCard label="Leadtime LTC" value={kpis.leadtimeLtcH} unit="h" deltaPct={0} status={kpis.leadtimeLtcH <= 4 ? "green" : kpis.leadtimeLtcH <= 6 ? "amber" : "red"} direction="lower-better" target={4} size="sm" />
       </section>
+
+      {/* === GPS map tuyến + stop points === */}
+      <Card
+        title="Bản đồ tuyến vận tải — KTC + stop points"
+        subtitle="KTC chấm cam (size = throughput), tuyến linehaul nối điểm đi → đến (màu theo ontime). Hover tuyến bên phải để highlight."
+      >
+        <VietnamMap nodes={map.nodes} routes={map.routes} />
+      </Card>
 
       {/* === Bảng sức khoẻ tuyến === */}
       <Card

@@ -6,6 +6,7 @@ import {
   getJourneyAlerts,
   getJourneyFinalStatusMix,
   getJourneyPercentiles,
+  getJourneySankey,
   getJourneyStatusGroups,
   getJourneyTopOrders,
 } from "@/lib/aggregators";
@@ -14,6 +15,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { FilterBar } from "@/components/filter/FilterBar";
 import { AlertBanner } from "@/components/ui/AlertBanner";
 import { Card } from "@/components/ui/Card";
+import { SankeyChart } from "@/components/ui/SankeyChart";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import {
   cn,
@@ -38,6 +40,7 @@ export default function JourneyPage() {
   const percentiles = useMemo(() => getJourneyPercentiles(filter), [filter]);
   const finalMix = useMemo(() => getJourneyFinalStatusMix(filter), [filter]);
   const topOrders = useMemo(() => getJourneyTopOrders(filter, 30), [filter]);
+  const sankey = useMemo(() => getJourneySankey(filter), [filter]);
   const alerts = useMemo(() => getJourneyAlerts(filter), [filter]);
   const updated = dataUpdatedAt();
 
@@ -76,12 +79,12 @@ export default function JourneyPage() {
         <StatusGroupTable groups={groups} />
       </Card>
 
-      {/* === Stage flow visual (bổ trợ) === */}
+      {/* === Sankey flow đơn === */}
       <Card
-        title="Hồ phễu trực quan"
-        subtitle="Cao = số lượng lớn. Đọc trái-phải theo flow đơn. Drop-off đỏ ở chặng nghẽn."
+        title="Sankey — luồng đơn theo trạng thái"
+        subtitle="Độ dày luồng = số đơn. Tạo đơn → Lấy → KTC → BC giao → Giao TC / Thất bại → Trả / Thất lạc."
       >
-        <StageFlowVisualization groups={groups} totalOrders={totalOrders} />
+        <SankeyChart data={sankey} height={440} />
       </Card>
 
       {/* === 8 outcome card (6 terminal + cancelled + in_progress) === */}
@@ -171,128 +174,6 @@ function StatusGroupTable({
     },
   ];
   return <DataTable columns={cols} data={groups} rowKey={(r) => r.groupKey} />;
-}
-
-// =============================================================================
-// Stage flow visualization — combined funnel + 6 group table
-// =============================================================================
-
-const STAGE_TONE: Record<string, string> = {
-  tao: "bg-slate-100",
-  lay: "bg-emerald-50",
-  "ktc-di": "bg-violet-50",
-  giao: "bg-amber-50",
-  "ktc-ve": "bg-sky-50",
-  tra: "bg-rose-50",
-};
-
-const STAGE_ACCENT: Record<string, string> = {
-  tao: "bg-slate-500",
-  lay: "bg-emerald-500",
-  "ktc-di": "bg-violet-500",
-  giao: "bg-amber-500",
-  "ktc-ve": "bg-sky-500",
-  tra: "bg-rose-500",
-};
-
-function StageFlowVisualization({
-  groups,
-  totalOrders,
-}: {
-  groups: ReturnType<typeof getJourneyStatusGroups>;
-  totalOrders: number;
-}) {
-  return (
-    <div className="overflow-x-auto">
-      <div className="flex items-stretch gap-2 min-w-[900px]">
-        {groups.map((g, idx) => {
-          const widthPct = totalOrders > 0 ? (g.total / totalOrders) * 100 : 0;
-          const dropPct = idx > 0 ? 100 - g.successRate : 0;
-          return (
-            <div
-              key={g.groupKey}
-              className={cn(
-                "flex-1 border rounded-md overflow-hidden",
-                STAGE_TONE[g.groupKey] ?? "bg-slate-50",
-              )}
-            >
-              <div className={cn("h-1", STAGE_ACCENT[g.groupKey] ?? "bg-slate-500")} />
-              <div className="p-3 space-y-2">
-                <div className="text-xs font-semibold text-[var(--color-text)]">
-                  {g.groupLabel}
-                </div>
-                {/* Volume bar */}
-                <div>
-                  <div className="text-2xl font-semibold tabular-nums text-[var(--color-text)]">
-                    {formatCompactInt(g.total)}
-                  </div>
-                  <div className="h-1.5 bg-[var(--color-hover)] rounded-full overflow-hidden mt-1">
-                    <div
-                      className={cn(
-                        "h-full",
-                        STAGE_ACCENT[g.groupKey] ?? "bg-slate-500",
-                      )}
-                      style={{ width: `${widthPct}%` }}
-                    />
-                  </div>
-                </div>
-                {/* Metrics */}
-                <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-[11px]">
-                  <div>
-                    <div className="text-[10px] uppercase text-[var(--color-text-muted)]">
-                      % Pass
-                    </div>
-                    <div
-                      className={cn(
-                        "tabular-nums font-medium",
-                        g.successRate >= 92
-                          ? "text-emerald-700"
-                          : g.successRate >= 85
-                            ? "text-amber-700"
-                            : "text-red-700",
-                      )}
-                    >
-                      {formatPct(g.successRate, 1)}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-[10px] uppercase text-[var(--color-text-muted)]">
-                      LT TB
-                    </div>
-                    <div className="tabular-nums font-medium">
-                      {g.avgLeadtimeH > 0 ? formatHours(g.avgLeadtimeH) : "—"}
-                    </div>
-                  </div>
-                  {idx > 0 && (
-                    <div className="col-span-2">
-                      <div className="text-[10px] uppercase text-[var(--color-text-muted)]">
-                        Drop-off
-                      </div>
-                      <div
-                        className={cn(
-                          "tabular-nums",
-                          dropPct <= 5
-                            ? "text-emerald-700"
-                            : dropPct <= 12
-                              ? "text-amber-700"
-                              : "text-red-700",
-                        )}
-                      >
-                        {formatCompactInt(g.failCount)} đơn · {formatPct(dropPct, 1)}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-      <div className="text-[10px] text-[var(--color-text-muted)] mt-2">
-        Mỗi cột = 1 chặng. Cao = throughput cao. Đọc trái-phải theo flow đơn.
-      </div>
-    </div>
-  );
 }
 
 // =============================================================================

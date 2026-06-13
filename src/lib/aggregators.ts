@@ -2670,3 +2670,219 @@ export function getWeeklyKpiReport(filter: FilterState): WeeklyKpiRow[] {
     mk("volume", "Sản lượng", "đơn", oThis.length, oLast.length, 0, 0, 0, true),
   ];
 }
+
+
+// =============================================================================
+// PHASE 8 — Sankey data cho /journey (order flow)
+// =============================================================================
+
+export type SankeyData = {
+  nodes: { name: string }[];
+  links: { source: number; target: number; value: number }[];
+};
+
+/**
+ * Sankey order flow:
+ *   Tạo đơn → Đã lấy / Huỷ
+ *   Đã lấy → Nhập KTC
+ *   Nhập KTC → Tại BC giao
+ *   Tại BC giao → Giao TC / Giao thất bại
+ *   Giao thất bại → Trả TC / Trả thất bại / Thất lạc
+ */
+export function getJourneySankey(filter: FilterState): SankeyData {
+  const orders = filterOrders(filter);
+  const total = orders.length;
+  const cancelled = orders.filter((o) => o.finalStatus === "cancelled").length;
+  const picked = orders.filter((o) => o.pickedTs).length;
+  const delivered = orders.filter((o) => o.finalStatus === "delivered").length;
+  const gtb = orders.filter((o) => o.finalStatus === "delivery_failed").length;
+  const retSucc = orders.filter((o) => o.finalStatus === "returned_success").length;
+  const retFail = orders.filter((o) => o.finalStatus === "returned_failed").length;
+  const lost = orders.filter((o) => o.finalStatus === "lost").length;
+  const exception = orders.filter((o) => o.finalStatus === "exception").length;
+  const inProgress = orders.filter((o) => o.finalStatus === "in_progress").length;
+
+  // node index
+  const N = {
+    tao: 0,
+    daLay: 1,
+    huy: 2,
+    nhapKtc: 3,
+    bcGiao: 4,
+    giaoTC: 5,
+    giaoTB: 6,
+    traTC: 7,
+    traTB: 8,
+    thatLac: 9,
+    dangXuLy: 10,
+  };
+  const nodes = [
+    { name: "Tạo đơn" },
+    { name: "Đã lấy" },
+    { name: "Huỷ" },
+    { name: "Nhập KTC" },
+    { name: "Tại BC giao" },
+    { name: "Giao thành công" },
+    { name: "Giao thất bại" },
+    { name: "Trả thành công" },
+    { name: "Trả thất bại" },
+    { name: "Thất lạc / Exception" },
+    { name: "Đang xử lý" },
+  ];
+
+  // flows
+  const atKtc = Math.round(picked * 0.99);
+  const atBcGiao = Math.round(atKtc * 0.98);
+
+  const links = [
+    { source: N.tao, target: N.daLay, value: Math.max(1, picked) },
+    { source: N.tao, target: N.huy, value: Math.max(1, cancelled) },
+    { source: N.daLay, target: N.nhapKtc, value: Math.max(1, atKtc) },
+    { source: N.nhapKtc, target: N.bcGiao, value: Math.max(1, atBcGiao) },
+    { source: N.bcGiao, target: N.giaoTC, value: Math.max(1, delivered) },
+    {
+      source: N.bcGiao,
+      target: N.giaoTB,
+      value: Math.max(1, gtb + retSucc + retFail),
+    },
+    { source: N.bcGiao, target: N.dangXuLy, value: Math.max(1, inProgress) },
+    { source: N.giaoTB, target: N.traTC, value: Math.max(1, retSucc) },
+    { source: N.giaoTB, target: N.traTB, value: Math.max(1, retFail) },
+    {
+      source: N.giaoTB,
+      target: N.thatLac,
+      value: Math.max(1, lost + exception),
+    },
+  ];
+
+  void total;
+  return { nodes, links };
+}
+
+
+// =============================================================================
+// PHASE 8 — GPS map cho /transport (vị trí KTC + trip stop points)
+// =============================================================================
+
+// Toạ độ địa lý xấp xỉ (lat,lng) của các tỉnh có KTC. Dùng để vẽ map.
+const PROVINCE_GEO: Record<string, { lat: number; lng: number }> = {
+  HNI: { lat: 21.03, lng: 105.85 },
+  HPG: { lat: 20.86, lng: 106.68 },
+  QNH: { lat: 21.01, lng: 107.29 },
+  BNH: { lat: 21.18, lng: 106.06 },
+  HDG: { lat: 20.94, lng: 106.33 },
+  NDH: { lat: 20.42, lng: 106.17 },
+  TNG: { lat: 21.59, lng: 105.84 },
+  HYE: { lat: 20.85, lng: 106.05 },
+  BGI: { lat: 21.27, lng: 106.19 },
+  VPC: { lat: 21.31, lng: 105.6 },
+  PTO: { lat: 21.32, lng: 105.4 },
+  LSN: { lat: 21.85, lng: 106.76 },
+  THA: { lat: 19.81, lng: 105.78 },
+  NAN: { lat: 18.67, lng: 105.69 },
+  HTI: { lat: 18.34, lng: 105.9 },
+  HUE: { lat: 16.46, lng: 107.59 },
+  DNG: { lat: 16.05, lng: 108.2 },
+  QNM: { lat: 15.57, lng: 108.47 },
+  QBI: { lat: 17.47, lng: 106.6 },
+  BDI: { lat: 13.78, lng: 109.22 },
+  KHA: { lat: 12.24, lng: 109.19 },
+  DLA: { lat: 12.71, lng: 108.24 },
+  HCM: { lat: 10.82, lng: 106.63 },
+  BDG: { lat: 11.0, lng: 106.65 },
+  DNI: { lat: 10.95, lng: 106.82 },
+  VTU: { lat: 10.41, lng: 107.14 },
+  LAN: { lat: 10.6, lng: 106.65 },
+  CTO: { lat: 10.04, lng: 105.78 },
+  TGG: { lat: 10.36, lng: 106.36 },
+  AGG: { lat: 10.52, lng: 105.13 },
+  KGG: { lat: 10.01, lng: 105.08 },
+  BTR: { lat: 10.24, lng: 106.38 },
+  STG: { lat: 9.6, lng: 105.97 },
+  TYI: { lat: 11.31, lng: 106.1 },
+};
+
+export type MapNode = {
+  code: string;
+  name: string;
+  lat: number;
+  lng: number;
+  throughput: number;
+};
+
+export type MapStop = {
+  code: string;
+  lat: number;
+  lng: number;
+  order: number;     // thứ tự stop trong trip
+  label: string;
+};
+
+export type MapTripRoute = {
+  tripId: string;
+  stops: MapStop[];
+  status: Status;
+};
+
+function geoOf(code: string): { lat: number; lng: number } | null {
+  // code dạng "HCM-KTC01" hoặc "BC-HCM-001" → tách province
+  let prov: string | undefined;
+  if (code.startsWith("BC-")) prov = code.split("-")[1];
+  else prov = code.split("-")[0];
+  return prov && PROVINCE_GEO[prov] ? PROVINCE_GEO[prov] : null;
+}
+
+/** Nodes (KTC) cho map + tối đa N trip route gần nhất với stop points. */
+export function getTransportMap(
+  filter: FilterState,
+  maxRoutes = 12,
+): { nodes: MapNode[]; routes: MapTripRoute[] } {
+  const ktcs = getKtcs();
+  const trips = filterTrips(filter);
+
+  const tp = new Map<string, number>();
+  for (const t of trips) {
+    if (t.ktcCode) tp.set(t.ktcCode, (tp.get(t.ktcCode) ?? 0) + t.parcels);
+  }
+
+  const nodes: MapNode[] = ktcs
+    .map((k) => {
+      const g = geoOf(k.code);
+      if (!g) return null;
+      return {
+        code: k.code,
+        name: k.name,
+        lat: g.lat,
+        lng: g.lng,
+        throughput: tp.get(k.code) ?? 0,
+      };
+    })
+    .filter((n): n is MapNode => n !== null);
+
+  // Routes: lấy LH trips (KTC↔KTC) để vẽ tuyến rõ ràng nhất
+  const lhTrips = trips
+    .filter((t) => t.type === "lh")
+    .sort((a, b) => b.parcels - a.parcels)
+    .slice(0, maxRoutes);
+
+  const routes: MapTripRoute[] = lhTrips
+    .map((t) => {
+      const og = geoOf(t.originCode);
+      const dg = geoOf(t.destCode);
+      if (!og || !dg) return null;
+      const late =
+        (new Date(t.actualArrive).getTime() - new Date(t.planArrive).getTime()) /
+        60000;
+      return {
+        tripId: t.tripId,
+        status: (late <= 15 ? "green" : late <= 60 ? "amber" : "red") as Status,
+        stops: [
+          { code: t.originCode, lat: og.lat, lng: og.lng, order: 1, label: t.originCode },
+          { code: t.destCode, lat: dg.lat, lng: dg.lng, order: 2, label: t.destCode },
+        ],
+      };
+    })
+    .filter((r): r is MapTripRoute => r !== null);
+
+  return { nodes, routes };
+}
