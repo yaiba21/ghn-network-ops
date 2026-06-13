@@ -1,0 +1,42 @@
+{
+  // Format on save bằng Prettier
+  "editor.formatOnSave": true,
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+
+  // Tailwind class autocomplete
+  "tailwindCSS.experimental.classRegex": [
+    ["cva\\(([^)]*)\\)", "[\"'`]([^\"'`]*).*?[\"'`]"],
+    ["cn\\(([^)]*)\\)", "[\"'`]([^\"'`]*).*?[\"'`]"]
+  ],
+  "files.associations": {
+    "*.css": "tailwindcss"
+  },
+
+  // TypeScript dùng version trong node_modules (không phải VS Code built-in)
+  "typescript.tsdk": "node_modules/typescript/lib",
+  "typescript.enablePromptUseWorkspaceTsdk": true,
+
+  // ESLint auto-fix on save
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": "explicit"
+  },
+
+  // Hide các folder không cần xem trong sidebar
+  "files.exclude": {
+    "**/.next": true,
+    "**/.git": true,
+    "**/node_modules": true,
+    "**/.DS_Store": true,
+    "**/tsconfig.tsbuildinfo": true
+  },
+
+  // Tabs vs spaces — 2 spaces theo Next.js convention
+  "editor.tabSize": 2,
+  "editor.insertSpaces": true,
+
+  // Format file kích thước hợp lý
+  "editor.rulers": [100],
+
+  // Auto-save khi switch file (đỡ phải Cmd+S)
+  "files.autoSave": "onFocusChange"
+}
