@@ -1,59 +1,51 @@
 "use client";
 
-import { ArrowRight, ExternalLink } from "lucide-react";
-import Link from "next/link";
+import { useMemo } from "react";
 import { useFilter } from "@/components/filter/FilterContext";
 import {
-  dataUpdatedAt,
-  getBcGiaoKpis,
-  getBcHoanKpis,
-  getBcNhanKpis,
-  getJourneyAnomalies,
+  getJourneyFinalStatusMix,
   getJourneyFunnel,
-  getJourneyOverview,
-  getKtcStatus,
-  getNetworkKpis,
-  getPickupKpis,
-} from "@/lib/mock-data";
+  getJourneyPercentiles,
+  getJourneyStatusGroups,
+  getJourneyTopOrders,
+} from "@/lib/aggregators";
+import { dataUpdatedAt } from "@/lib/mock-data";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { FilterBar } from "@/components/filter/FilterBar";
-import { AlertBanner } from "@/components/ui/AlertBanner";
 import { Card } from "@/components/ui/Card";
-import { KpiCardFrom } from "@/components/ui/KpiCard";
-import { Funnel } from "@/components/ui/Funnel";
-import { JourneyFlow } from "@/components/journey/JourneyFlow";
-import { formatCompactInt, formatVND } from "@/lib/utils";
-import { STATUS_TOKENS } from "@/lib/kpi-config";
-import type {
-  BcGiaoKpis,
-  BcHoanKpis,
-  BcNhanKpis,
-  JourneyStageKey,
-  PickupKpis,
-} from "@/lib/types";
+import { DataTable, type Column } from "@/components/ui/DataTable";
+import { Donut } from "@/components/ui/Donut";
+import { StatusBadge } from "@/components/ui/StatusBadge";
+import { cn, formatCompactInt, formatPct, formatVND, formatVNDate, formatHours } from "@/lib/utils";
+import { CHANNEL_LABEL_VI, LOAI_HANG_LABEL_VI, type ChannelCode, type LoaiHang } from "@/lib/types";
 
 export default function JourneyPage() {
   const { filter } = useFilter();
 
-  const stages = getJourneyOverview(filter);
-  const anomalies = getJourneyAnomalies(filter);
-  const pickup = getPickupKpis(filter);
-  const bcNhan = getBcNhanKpis(filter);
-  const network = getNetworkKpis(filter);
-  const ktcStatuses = getKtcStatus(filter);
-  const bcGiao = getBcGiaoKpis(filter);
-  const bcHoan = getBcHoanKpis(filter);
+  const funnel = useMemo(() => getJourneyFunnel(filter), [filter]);
+  const groups = useMemo(() => getJourneyStatusGroups(filter), [filter]);
+  const percentiles = useMemo(() => getJourneyPercentiles(filter), [filter]);
+  const finalMix = useMemo(() => getJourneyFinalStatusMix(filter), [filter]);
+  const topOrders = useMemo(() => getJourneyTopOrders(filter, 30), [filter]);
   const updated = dataUpdatedAt();
+
+  const finalMixSlices = finalMix.map((m) => ({
+    key: m.status,
+    label: m.label,
+    value: m.count,
+    color: m.color,
+  }));
+  const totalOrders = finalMix.reduce((a, b) => a + b.count, 0);
 
   return (
     <div className="space-y-4">
       <PageHeader
         breadcrumb={[
           { label: "GHN Network Ops", href: "/" },
-          { label: "Journey vận hành" },
+          { label: "Hành Trình Đơn Hàng" },
         ]}
-        title="Journey vận hành"
-        subtitle="Từ lúc nhận đến khi giao thành công (hoặc hoàn). Mỗi chặng là 1 stage funnel với KPI riêng — click ô bên trên để nhảy nhanh."
+        title="Hành Trình Đơn Hàng — theo trạng thái"
+        subtitle="6 nhóm trạng thái từ tạo đơn đến giao thành công (hoặc hoàn). Funnel + percentile lead time + drill xuống MVĐ."
         updatedAt={updated}
       />
 
@@ -61,464 +53,309 @@ export default function JourneyPage() {
         show={{
           region: true,
           province: true,
-          service: true,
-          granularity: true,
+          channel: true,
+          loaiHang: true,
+          loaiTuyen: true,
+          slaDays: true,
         }}
       />
 
-      {/* Visual 5-stage flow */}
+      {/* === Funnel theo trạng thái === */}
       <Card
-        title="Tổng quan hành trình"
-        subtitle="Status + tỷ lệ pass + throughput mỗi chặng. Click 1 chặng để cuộn xuống chi tiết."
+        title="Funnel trạng thái — từ tạo đơn → terminal"
+        subtitle="Hồ phễu các mốc chính trong đời đơn. Nhánh thất bại (Huỷ / Thất lạc) tô đỏ."
       >
-        <JourneyFlow stages={stages} />
+        <FunnelChart funnel={funnel} />
       </Card>
 
-      {anomalies.length > 0 && (
-        <AlertBanner alerts={anomalies} />
-      )}
+      {/* === 6 nhóm trạng thái table === */}
+      <Card
+        title="6 nhóm trạng thái — chỉ số chi tiết"
+        subtitle="Throughput · Tỷ lệ thành công · Lead time trung bình · Số đơn fail."
+      >
+        <StatusGroupTable rows={groups} />
+      </Card>
 
-      {/* Stage 1 — Pickup */}
-      <PickupSection kpis={pickup} funnel={getJourneyFunnel(filter, "pickup")} />
-
-      {/* Stage 2 — BC nhận */}
-      <BcNhanSection
-        kpis={bcNhan}
-        funnel={getJourneyFunnel(filter, "bcNhan")}
-      />
-
-      {/* Stage 3 — KTC */}
-      <KtcSection
-        sortAccuracy={network.sortAccuracy.value}
-        tatHub={network.tatHub.value}
-        missortRate={network.missortRate.value}
-        overstayRate={network.overstayRate.value}
-        funnel={getJourneyFunnel(filter, "ktc")}
-        topUnderperformer={
-          ktcStatuses
-            .slice()
-            .sort((a, b) => b.tatHours - a.tatHours)
-            .find((k) => k.status !== "green")?.ktcName ?? "—"
-        }
-      />
-
-      {/* Stage 4 — BC giao */}
-      <BcGiaoSection
-        kpis={bcGiao}
-        funnel={getJourneyFunnel(filter, "bcGiao")}
-      />
-
-      {/* Stage 5 — BC hoàn */}
-      <BcHoanSection
-        kpis={bcHoan}
-        funnel={getJourneyFunnel(filter, "bcHoan")}
-      />
-    </div>
-  );
-}
-
-// ---------- Stage section wrapper ---------------------------------------
-
-function StageHeader({
-  step,
-  label,
-  description,
-  tone,
-  anchorKey,
-  linkHref,
-  linkLabel,
-}: {
-  step: number;
-  label: string;
-  description: string;
-  tone: "green" | "blue" | "violet" | "amber" | "rose";
-  anchorKey: JourneyStageKey;
-  linkHref?: string;
-  linkLabel?: string;
-}) {
-  const stripTone: Record<typeof tone, string> = {
-    green: "bg-emerald-500",
-    blue: "bg-sky-500",
-    violet: "bg-violet-500",
-    amber: "bg-amber-500",
-    rose: "bg-rose-500",
-  };
-  return (
-    <div
-      id={`stage-${anchorKey}`}
-      className="scroll-mt-20 flex items-start justify-between gap-4 pt-2"
-    >
-      <div className="flex items-start gap-3">
-        <span
-          className={`w-7 h-7 shrink-0 rounded-md text-white font-semibold flex items-center justify-center text-sm ${stripTone[tone]}`}
-        >
-          {step}
-        </span>
-        <div>
-          <h2 className="text-base font-semibold text-[var(--color-text)]">
-            {label}
-          </h2>
-          <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
-            {description}
-          </p>
-        </div>
-      </div>
-      {linkHref && (
-        <Link
-          href={linkHref}
-          className="shrink-0 inline-flex items-center gap-1 text-xs font-medium text-[var(--color-ghn-red)] hover:underline"
-        >
-          {linkLabel ?? "Xem chi tiết"} <ExternalLink className="w-3 h-3" />
-        </Link>
-      )}
-    </div>
-  );
-}
-
-// ---------- Stage 1: Pickup ---------------------------------------------
-
-function PickupSection({
-  kpis,
-  funnel,
-}: {
-  kpis: PickupKpis;
-  funnel: ReturnType<typeof getJourneyFunnel>;
-}) {
-  return (
-    <section className="space-y-3">
-      <StageHeader
-        step={1}
-        label="Nhận hàng — Pickup"
-        description="Người gửi mang đến bưu cục hoặc NVPTTT đi nhận tại địa chỉ. Đo throughput + tỷ lệ huỷ + trễ pickup."
-        tone="green"
-        anchorKey="pickup"
-      />
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <KpiCardFrom kpi={kpis.successRate} size="sm" />
-        <KpiCardFrom kpi={kpis.cancelRate} size="sm" />
-        <KpiCardFrom kpi={kpis.lateRate} size="sm" />
-        <KpiCardFrom
-          kpi={kpis.avgTatMin}
-          size="sm"
-          hint="Từ lúc yêu cầu → nhập BC"
-        />
-      </div>
+      {/* === Percentile + Final status mix === */}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
         <div className="xl:col-span-2">
           <Card
-            title="Funnel pickup hôm nay"
-            subtitle="Yêu cầu pickup → NVPTTT đến → Lấy thành công → Nhập BC nhận."
+            title="Percentile Lead Time — P50 / P90 / P99"
+            subtitle="Time 1 (scan đơn đầu) · Time 2 (kết thúc phiên) · Lead time E2E."
           >
-            <Funnel steps={funnel} />
-          </Card>
-        </div>
-        <PickupSplitCard />
-      </div>
-    </section>
-  );
-}
-
-function PickupSplitCard() {
-  // Mock: ~62% pickup tại nhà (NVPTTT), 38% mang tới BC.
-  const totalHome = 62;
-  const totalBc = 38;
-  return (
-    <Card
-      title="Phân bổ kênh pickup"
-      subtitle="Tỷ trọng pickup tại nhà vs mang tới BC."
-    >
-      <div className="space-y-3">
-        <ChannelRow label="NVPTTT đến địa chỉ người gửi" pct={totalHome} color="#F97316" />
-        <ChannelRow label="Người gửi mang đến BC" pct={totalBc} color="#1F2937" />
-      </div>
-      <div className="mt-3 pt-3 border-t border-[var(--color-border-soft)] text-xs text-[var(--color-text-muted)]">
-        Pickup tại nhà chiếm phần lớn — TAT trung bình +12 phút vs mang tới BC.
-      </div>
-    </Card>
-  );
-}
-
-function ChannelRow({
-  label,
-  pct,
-  color,
-}: {
-  label: string;
-  pct: number;
-  color: string;
-}) {
-  return (
-    <div>
-      <div className="flex items-center justify-between text-xs mb-1">
-        <span className="text-[var(--color-text)]">{label}</span>
-        <span className="font-semibold tabular-nums">{pct.toFixed(1)}%</span>
-      </div>
-      <div className="h-1.5 bg-[var(--color-hover)] rounded-full overflow-hidden">
-        <div
-          className="h-full rounded-full"
-          style={{ width: `${pct}%`, backgroundColor: color }}
-        />
-      </div>
-    </div>
-  );
-}
-
-// ---------- Stage 2: BC nhận --------------------------------------------
-
-function BcNhanSection({
-  kpis,
-  funnel,
-}: {
-  kpis: BcNhanKpis;
-  funnel: ReturnType<typeof getJourneyFunnel>;
-}) {
-  return (
-    <section className="space-y-3">
-      <StageHeader
-        step={2}
-        label="Bưu cục nhận: xử lý & phân kiện"
-        description="Tạo & bắn đơn → phân loại → đóng kiện → xuất KTC/BC giao. Nguồn rủi ro: sai mã, sai kiện, không có MVĐ."
-        tone="blue"
-        anchorKey="bcNhan"
-      />
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <KpiCardFrom kpi={kpis.wrongCodeRate} size="sm" />
-        <KpiCardFrom kpi={kpis.wrongPackageRate} size="sm" />
-        <KpiCardFrom kpi={kpis.missingMvdRate} size="sm" />
-        <KpiCardFrom
-          kpi={kpis.processingTatMin}
-          size="sm"
-          hint="Tạo đơn → xuất kiện"
-        />
-      </div>
-      <Card
-        title="Funnel xử lý tại BC nhận"
-        subtitle="Drop-off lớn ở Phân loại / Đóng kiện → BC đang nghẽn nhân lực."
-      >
-        <Funnel steps={funnel} />
-      </Card>
-    </section>
-  );
-}
-
-// ---------- Stage 3: KTC ------------------------------------------------
-
-function KtcSection({
-  sortAccuracy,
-  tatHub,
-  missortRate,
-  overstayRate,
-  funnel,
-  topUnderperformer,
-}: {
-  sortAccuracy: number;
-  tatHub: number;
-  missortRate: number;
-  overstayRate: number;
-  funnel: ReturnType<typeof getJourneyFunnel>;
-  topUnderperformer: string;
-}) {
-  return (
-    <section className="space-y-3">
-      <StageHeader
-        step={3}
-        label="Kho trung chuyển (KTC)"
-        description="Hub phân loại trung gian. Nhập → kiểm seal → phân loại → đóng kiện → xuất tiếp KTC/BC giao."
-        tone="violet"
-        anchorKey="ktc"
-        linkHref="/network"
-        linkLabel="Xem dashboard Mạng lưới"
-      />
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <KtcQuickStat
-          label="Sort accuracy KTC"
-          value={`${sortAccuracy.toFixed(2)}%`}
-          status={sortAccuracy >= 99.5 ? "green" : sortAccuracy >= 98.5 ? "amber" : "red"}
-        />
-        <KtcQuickStat
-          label="TAT tại KTC"
-          value={`${tatHub.toFixed(1)}h`}
-          status={tatHub <= 4 ? "green" : tatHub <= 8 ? "amber" : "red"}
-        />
-        <KtcQuickStat
-          label="% Missort"
-          value={`${missortRate.toFixed(1)}%`}
-          status={missortRate <= 0.5 ? "green" : missortRate <= 1.5 ? "amber" : "red"}
-        />
-        <KtcQuickStat
-          label="% Overstay (qua đêm)"
-          value={`${overstayRate.toFixed(1)}%`}
-          status={overstayRate <= 2 ? "green" : overstayRate <= 5 ? "amber" : "red"}
-        />
-      </div>
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
-        <div className="xl:col-span-2">
-          <Card
-            title="Funnel overstay KTC hôm nay"
-            subtitle="Nhập KTC → sort xong → đóng kiện → xuất hàng."
-          >
-            <Funnel steps={funnel} />
+            <PercentileTable rows={percentiles} />
           </Card>
         </div>
         <Card
-          title="KTC cần chú ý nhất"
-          subtitle="Đang underperform xa nhất theo TAT + sort accuracy."
+          title="Mix trạng thái cuối"
+          subtitle={`Tổng ${formatCompactInt(totalOrders)} đơn — phân phối final_status.`}
         >
-          <div className="space-y-2">
-            <div className="text-xl font-semibold text-[var(--color-text)]">
-              {topUnderperformer}
-            </div>
-            <div className="text-xs text-[var(--color-text-muted)]">
-              Mở dashboard Mạng lưới để xem chi tiết từng KTC, sort accuracy realtime, và lanes phụ thuộc.
-            </div>
-            <Link
-              href="/network"
-              className="inline-flex items-center gap-1 text-xs font-medium text-[var(--color-ghn-red)] hover:underline"
-            >
-              Drill xuống /network <ArrowRight className="w-3 h-3" />
-            </Link>
-          </div>
+          <Donut
+            data={finalMixSlices}
+            height={200}
+            innerRadius={50}
+            outerRadius={80}
+            valueFormatter={(v) => `${formatCompactInt(v)} đơn`}
+            centerLabel={
+              <>
+                <div className="text-[10px] uppercase text-[var(--color-text-muted)]">Tổng</div>
+                <div className="text-base font-semibold tabular-nums">
+                  {formatCompactInt(totalOrders)}
+                </div>
+              </>
+            }
+          />
+          <ul className="mt-3 space-y-1.5">
+            {finalMix.map((m) => (
+              <li key={m.status} className="flex items-center justify-between text-xs">
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: m.color }} />
+                  <span>{m.label}</span>
+                </div>
+                <span className="font-semibold tabular-nums">{formatPct(m.share, 1)}</span>
+              </li>
+            ))}
+          </ul>
         </Card>
       </div>
-    </section>
-  );
-}
 
-function KtcQuickStat({
-  label,
-  value,
-  status,
-}: {
-  label: string;
-  value: string;
-  status: "green" | "amber" | "red";
-}) {
-  return (
-    <div className="border border-[var(--color-border)] rounded-md bg-white p-3">
-      <div className="flex items-center justify-between">
-        <div className="text-[11px] uppercase tracking-wide text-[var(--color-text-muted)] truncate">
-          {label}
-        </div>
-        <span
-          className={`w-2 h-2 rounded-full ${STATUS_TOKENS[status].dot}`}
-          aria-label={status}
-        />
-      </div>
-      <div className="mt-1.5 text-2xl font-semibold tabular-nums text-[var(--color-text)]">
-        {value}
-      </div>
+      {/* === Drill MVĐ === */}
+      <OrdersDrillTable rows={topOrders} />
     </div>
   );
 }
 
-// ---------- Stage 4: BC giao --------------------------------------------
+// =============================================================================
+// Sub-components
+// =============================================================================
 
-function BcGiaoSection({
-  kpis,
-  funnel,
-}: {
-  kpis: BcGiaoKpis;
-  funnel: ReturnType<typeof getJourneyFunnel>;
-}) {
-  const codPendingPct =
-    kpis.codCollected === 0
-      ? 0
-      : (kpis.codPendingDeposit / kpis.codCollected) * 100;
+function FunnelChart({ funnel }: { funnel: ReturnType<typeof getJourneyFunnel> }) {
+  const max = Math.max(...funnel.map((n) => n.count));
   return (
-    <section className="space-y-3">
-      <StageHeader
-        step={4}
-        label="Bưu cục giao: last-mile"
-        description="Nhập kiện · phân tuyến · NVBC giao. Kết quả: ✓ GTC · ~ GT1P · × GTB (>3 lần → chuyển hoàn)."
-        tone="amber"
-        anchorKey="bcGiao"
-      />
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <KpiCardFrom kpi={kpis.gtcRate} size="sm" hint="Giao thành công" />
-        <KpiCardFrom kpi={kpis.gt1pRate} size="sm" hint="Giao 1 phần" />
-        <KpiCardFrom kpi={kpis.gtbRate} size="sm" hint="Giao thất bại" />
-        <KpiCardFrom kpi={kpis.lostRate} size="sm" hint="Thất lạc / hư hỏng" />
-      </div>
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
-        <div className="xl:col-span-2">
-          <Card
-            title="Funnel last-mile hôm nay"
-            subtitle="Nhập BC giao → phân tuyến → trên đường giao → giao thành công."
-          >
-            <Funnel steps={funnel} />
-          </Card>
-        </div>
-        <Card title="COD hôm nay" subtitle="Tiền thu hộ — tổng & phần chưa nộp lại.">
-          <div className="space-y-3">
-            <div>
-              <div className="text-[10px] uppercase tracking-wide text-[var(--color-text-muted)]">
-                Đã thu
-              </div>
-              <div className="text-2xl font-semibold tabular-nums text-[var(--color-text)]">
-                {formatVND(kpis.codCollected, true)}
-              </div>
-              <div className="text-[11px] text-[var(--color-text-muted)] mt-0.5">
-                ~{formatCompactInt(kpis.codCollected / 280_000)} đơn có COD
+    <div className="space-y-1.5">
+      {funnel.map((n) => {
+        const widthPct = max === 0 ? 0 : (n.count / max) * 100;
+        const color = n.isFail
+          ? "#ef4444"
+          : n.isTerminal
+            ? "#10b981"
+            : "#1F2937";
+        const textColor = n.isFail
+          ? "text-red-700"
+          : n.isTerminal
+            ? "text-emerald-700"
+            : "text-[var(--color-text)]";
+        return (
+          <div key={n.key} className="flex items-center gap-2">
+            <div className="w-32 shrink-0 text-xs truncate">{n.label}</div>
+            <div className="flex-1 relative h-7 bg-[var(--color-hover)] rounded">
+              <div
+                className="absolute left-0 top-0 bottom-0 rounded transition-[width] duration-300"
+                style={{ width: `${widthPct}%`, backgroundColor: color }}
+              />
+              <div
+                className={cn(
+                  "absolute left-2 top-0 bottom-0 flex items-center text-xs font-medium tabular-nums",
+                  widthPct > 25 ? "text-white" : textColor,
+                )}
+              >
+                {formatCompactInt(n.count)}
               </div>
             </div>
-            <div className="pt-3 border-t border-[var(--color-border-soft)]">
-              <div className="text-[10px] uppercase tracking-wide text-[var(--color-text-muted)]">
-                Chưa nộp lại
-              </div>
-              <div className="flex items-baseline gap-2">
-                <div className="text-xl font-semibold tabular-nums text-[var(--color-text)]">
-                  {formatVND(kpis.codPendingDeposit, true)}
-                </div>
-                <div
-                  className={`text-xs font-medium ${
-                    codPendingPct <= 10
-                      ? "text-emerald-600"
-                      : codPendingPct <= 25
-                        ? "text-amber-600"
-                        : "text-red-600"
-                  }`}
-                >
-                  {codPendingPct.toFixed(1)}%
-                </div>
-              </div>
+            <div className={cn("w-20 shrink-0 text-right text-xs tabular-nums", textColor)}>
+              {formatPct((n.count / Math.max(1, funnel[0].count)) * 100, 1)}
             </div>
           </div>
-        </Card>
-      </div>
-    </section>
+        );
+      })}
+    </div>
   );
 }
 
-// ---------- Stage 5: BC hoàn --------------------------------------------
-
-function BcHoanSection({
-  kpis,
-  funnel,
-}: {
-  kpis: BcHoanKpis;
-  funnel: ReturnType<typeof getJourneyFunnel>;
-}) {
+function StatusGroupTable({ rows }: { rows: ReturnType<typeof getJourneyStatusGroups> }) {
+  const cols: Column<ReturnType<typeof getJourneyStatusGroups>[number]>[] = [
+    {
+      key: "groupLabel",
+      label: "Nhóm trạng thái",
+      render: (r) => <span className="font-medium">{r.groupLabel}</span>,
+    },
+    {
+      key: "total",
+      label: "Throughput",
+      align: "right",
+      sortable: true,
+      sortValue: (r) => r.total,
+      render: (r) => formatCompactInt(r.total) + " đơn",
+    },
+    {
+      key: "successRate",
+      label: "Tỷ lệ thành công",
+      align: "right",
+      sortable: true,
+      sortValue: (r) => r.successRate,
+      render: (r) => (
+        <span
+          className={
+            r.successRate >= 92
+              ? "text-emerald-600"
+              : r.successRate >= 85
+                ? "text-amber-600"
+                : "text-red-600"
+          }
+        >
+          {formatPct(r.successRate, 1)}
+        </span>
+      ),
+    },
+    {
+      key: "avgLeadtimeH",
+      label: "Lead time TB",
+      align: "right",
+      sortable: true,
+      sortValue: (r) => r.avgLeadtimeH,
+      render: (r) => formatHours(r.avgLeadtimeH),
+    },
+    {
+      key: "failCount",
+      label: "Đơn fail",
+      align: "right",
+      sortable: true,
+      sortValue: (r) => r.failCount,
+      render: (r) => formatCompactInt(r.failCount),
+    },
+  ];
   return (
-    <section className="space-y-3">
-      <StageHeader
-        step={5}
-        label="Bưu cục hoàn: xử lý & hoàn trả"
-        description="Đơn GTB >3 lần hoặc yêu cầu hoàn → NVBC hoàn cho người gửi. Hoàn thất bại quá lâu → lưu kho."
-        tone="rose"
-        anchorKey="bcHoan"
+    <DataTable
+      columns={cols}
+      data={rows}
+      rowKey={(r) => r.groupKey}
+    />
+  );
+}
+
+function PercentileTable({ rows }: { rows: ReturnType<typeof getJourneyPercentiles> }) {
+  return (
+    <div className="border border-[var(--color-border)] rounded-md overflow-hidden">
+      <table className="w-full text-sm">
+        <thead className="bg-[var(--color-table-head)]">
+          <tr>
+            <th className="text-left px-4 py-2 text-xs uppercase tracking-wide text-[var(--color-text-muted)] font-medium">
+              Chỉ số
+            </th>
+            <th className="text-right px-4 py-2 text-xs uppercase tracking-wide text-[var(--color-text-muted)] font-medium">
+              P50
+            </th>
+            <th className="text-right px-4 py-2 text-xs uppercase tracking-wide text-[var(--color-text-muted)] font-medium">
+              P90
+            </th>
+            <th className="text-right px-4 py-2 text-xs uppercase tracking-wide text-[var(--color-text-muted)] font-medium">
+              P99
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.metric} className="border-t border-[var(--color-border-soft)]">
+              <td className="px-4 py-2.5">{r.metric}</td>
+              <td className="px-4 py-2.5 text-right tabular-nums font-semibold">
+                {r.p50}
+                {r.unit === "h" ? "h" : "'"}
+              </td>
+              <td className="px-4 py-2.5 text-right tabular-nums">
+                {r.p90}
+                {r.unit === "h" ? "h" : "'"}
+              </td>
+              <td className="px-4 py-2.5 text-right tabular-nums">
+                {r.p99}
+                {r.unit === "h" ? "h" : "'"}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function OrdersDrillTable({
+  rows,
+}: {
+  rows: ReturnType<typeof getJourneyTopOrders>;
+}) {
+  const cols: Column<ReturnType<typeof getJourneyTopOrders>[number]>[] = [
+    {
+      key: "mvd",
+      label: "MVĐ",
+      sortable: true,
+      render: (r) => <span className="font-mono text-xs">{r.mvd}</span>,
+    },
+    {
+      key: "createdAt",
+      label: "Tạo lúc",
+      render: (r) => (
+        <span className="text-xs text-[var(--color-text-muted)]">
+          {formatVNDate(r.createdAt.slice(0, 10))} {r.createdAt.slice(11, 16)}
+        </span>
+      ),
+    },
+    { key: "province", label: "Tỉnh nhận" },
+    {
+      key: "channel",
+      label: "Nguồn đơn",
+      render: (r) => CHANNEL_LABEL_VI[r.channel as ChannelCode] ?? r.channel,
+    },
+    {
+      key: "loaiHang",
+      label: "Loại hàng",
+      render: (r) => LOAI_HANG_LABEL_VI[r.loaiHang as LoaiHang] ?? r.loaiHang,
+    },
+    { key: "slaDays", label: "SLA", align: "right", render: (r) => `${r.slaDays}d` },
+    {
+      key: "currentState",
+      label: "Trạng thái hiện tại",
+      render: (r) => (
+        <span className="text-xs font-mono px-1.5 py-0.5 bg-[var(--color-hover)] rounded">
+          {r.currentState}
+        </span>
+      ),
+    },
+    {
+      key: "finalStatus",
+      label: "Kết quả",
+      render: (r) => {
+        const status =
+          r.finalStatus === "delivered"
+            ? "green"
+            : r.finalStatus === "returned"
+              ? "amber"
+              : r.finalStatus === "lost"
+                ? "red"
+                : "amber";
+        return <StatusBadge status={status} label={r.finalStatus} />;
+      },
+    },
+    {
+      key: "leadtimeH",
+      label: "LT E2E",
+      align: "right",
+      sortable: true,
+      sortValue: (r) => r.leadtimeH,
+      render: (r) => (r.leadtimeH > 0 ? formatHours(r.leadtimeH) : "—"),
+    },
+  ];
+  return (
+    <Card
+      title="Drill xuống MVĐ — Top 30 đơn gần nhất"
+      subtitle="Click cột để sort. Xem MVĐ cụ thể để truy trace pattern lỗi."
+    >
+      <DataTable
+        columns={cols}
+        data={rows}
+        rowKey={(r) => r.mvd}
+        searchable
+        searchPlaceholder="Tìm MVĐ, tỉnh, trạng thái..."
+        pageSize={15}
       />
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <KpiCardFrom kpi={kpis.returnSuccessRate} size="sm" />
-        <KpiCardFrom kpi={kpis.returnFailRate} size="sm" />
-        <KpiCardFrom kpi={kpis.avgReturnDays} size="sm" hint="GTB → trả người gửi" />
-        <KpiCardFrom kpi={kpis.storedRate} size="sm" hint="Lưu kho quá hạn" />
-      </div>
-      <Card
-        title="Funnel hoàn trả"
-        subtitle="Yêu cầu hoàn → nhập BC hoàn → NVBC giao hoàn → hoàn thành công."
-      >
-        <Funnel steps={funnel} />
-      </Card>
-    </section>
+    </Card>
   );
 }

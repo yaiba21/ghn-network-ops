@@ -11,6 +11,7 @@ import {
   Settings,
   Workflow,
   PackageSearch,
+  Bus,
   ChevronDown,
   ChevronRight,
   type LucideProps,
@@ -28,11 +29,12 @@ type NavItem = {
 };
 
 const NAV: NavItem[] = [
-  { label: "Tổng quan", href: "/", icon: LayoutDashboard },
-  { label: "Hành trình đơn", href: "/order-journey", icon: PackageSearch },
-  { label: "Journey vận hành", href: "/journey", icon: Workflow },
-  { label: "Định tuyến (ORS)", href: "/routing", icon: Route },
-  { label: "Mạng lưới (NDS + KTC)", href: "/network", icon: Truck },
+  { label: "Tổng Quan", href: "/", icon: LayoutDashboard },
+  { label: "Hành Trình Đơn", href: "/journey", icon: PackageSearch },
+  { label: "Các Chặng Vận Hành", href: "/stages", icon: Workflow },
+  { label: "Định Tuyến (ORS)", href: "/routing", icon: Route },
+  { label: "Mạng Lưới (NDS + KTC)", href: "/network", icon: Truck },
+  { label: "Vận Tải", href: "/transport", icon: Bus },
   {
     label: "Báo cáo",
     icon: BarChart3,

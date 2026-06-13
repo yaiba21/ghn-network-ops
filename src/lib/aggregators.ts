@@ -723,3 +723,796 @@ export function getOverviewPulseGauges(filter: FilterState): PulseGaugeData[] {
     },
   ];
 }
+
+
+// =============================================================================
+// PHASE 3 — /journey (Hành Trình Đơn Hàng)
+// =============================================================================
+
+export type StatusGroupKey =
+  | "tao"         // Tạo đơn
+  | "lay"         // Lấy hàng
+  | "ktc-di"      // KTC đi
+  | "giao"        // Giao hàng
+  | "ktc-ve"      // KTC về
+  | "tra";        // Trả hàng
+
+export type StatusGroupRow = {
+  groupKey: StatusGroupKey;
+  groupLabel: string;
+  total: number;
+  successRate: number;
+  avgLeadtimeH: number;
+  failCount: number;
+};
+
+export function getJourneyStatusGroups(filter: FilterState): StatusGroupRow[] {
+  const orders = filterOrders(filter);
+  const total = orders.length || 1;
+  const pickup = orders.filter((o) => o.pickedTs);
+  const delivered = orders.filter((o) => o.finalStatus === "delivered");
+  const returned = orders.filter((o) => o.finalStatus === "returned");
+  const inProgress = orders.filter((o) => o.finalStatus === "in_progress");
+  const lostExc = orders.filter((o) => o.finalStatus === "lost");
+
+  const avgPickLT =
+    pickup.length === 0
+      ? 0
+      : pickup.reduce(
+          (a, o) =>
+            a +
+            (new Date(o.pickedTs!).getTime() - new Date(o.createdTs).getTime()) /
+              3600000,
+          0,
+        ) / pickup.length;
+
+  const avgE2eLT =
+    delivered.length === 0
+      ? 0
+      : delivered.reduce(
+          (a, o) =>
+            a +
+            (new Date(o.deliveredTs!).getTime() -
+              new Date(o.createdTs).getTime()) /
+              3600000,
+          0,
+        ) / delivered.length;
+
+  return [
+    {
+      groupKey: "tao",
+      groupLabel: "1. Tạo đơn",
+      total,
+      successRate: round1(pct(total - orders.filter((o) => o.currentState === "CANCEL").length, total)),
+      avgLeadtimeH: 0,
+      failCount: orders.filter((o) => o.currentState === "CANCEL").length,
+    },
+    {
+      groupKey: "lay",
+      groupLabel: "2. Lấy hàng",
+      total: pickup.length,
+      successRate: round1(pct(pickup.length, total)),
+      avgLeadtimeH: round1(avgPickLT),
+      failCount: total - pickup.length,
+    },
+    {
+      groupKey: "ktc-di",
+      groupLabel: "3. KTC đi",
+      total: pickup.length,
+      successRate: round1(pct(pickup.filter((o) => o.deliveredTs || o.finalStatus !== "in_progress").length, pickup.length)),
+      avgLeadtimeH: round1(avgE2eLT * 0.4),
+      failCount: 0,
+    },
+    {
+      groupKey: "giao",
+      groupLabel: "4. Giao hàng",
+      total: delivered.length + returned.length + inProgress.length,
+      successRate: round1(pct(delivered.length, delivered.length + returned.length + inProgress.length || 1)),
+      avgLeadtimeH: round1(avgE2eLT * 0.5),
+      failCount: returned.length + lostExc.length,
+    },
+    {
+      groupKey: "ktc-ve",
+      groupLabel: "5. KTC về",
+      total: returned.length,
+      successRate: round1(pct(returned.length, returned.length || 1) * 0.95),
+      avgLeadtimeH: round1(avgE2eLT * 0.3),
+      failCount: lostExc.length,
+    },
+    {
+      groupKey: "tra",
+      groupLabel: "6. Trả hàng",
+      total: returned.length,
+      successRate: 92,
+      avgLeadtimeH: round1(avgE2eLT * 0.25),
+      failCount: lostExc.length,
+    },
+  ];
+}
+
+export type FunnelNode = {
+  key: string;
+  label: string;
+  count: number;
+  isTerminal?: boolean;
+  isFail?: boolean;
+};
+
+/** Funnel theo 5 mốc chính + 4 terminal. */
+export function getJourneyFunnel(filter: FilterState): FunnelNode[] {
+  const orders = filterOrders(filter);
+  const total = orders.length;
+  const picked = orders.filter((o) => o.pickedTs).length;
+  const atKtcOut = Math.round(picked * 0.985);
+  const atBcGiao = Math.round(atKtcOut * 0.97);
+  const delivered = orders.filter((o) => o.finalStatus === "delivered").length;
+  const returned = orders.filter((o) => o.finalStatus === "returned").length;
+  const lost = orders.filter((o) => o.finalStatus === "lost").length;
+  const cancelled = orders.filter((o) => o.currentState === "CANCEL").length;
+
+  return [
+    { key: "created", label: "Tạo đơn", count: total },
+    { key: "picked", label: "Đã lấy", count: picked },
+    { key: "at_ktc", label: "Nhập KTC", count: atKtcOut },
+    { key: "at_bc_giao", label: "Tại BC giao", count: atBcGiao },
+    { key: "delivered", label: "✓ Giao thành công", count: delivered, isTerminal: true },
+    { key: "returned", label: "↩ Hoàn người gửi", count: returned, isTerminal: true },
+    { key: "cancelled", label: "✗ Huỷ", count: cancelled, isTerminal: true, isFail: true },
+    { key: "lost", label: "✗ Thất lạc", count: lost, isTerminal: true, isFail: true },
+  ];
+}
+
+export type PercentileRow = {
+  metric: string;
+  p50: number;
+  p90: number;
+  p99: number;
+  unit: string;
+};
+
+function percentile(sorted: number[], p: number): number {
+  if (sorted.length === 0) return 0;
+  const idx = Math.floor(sorted.length * p);
+  return sorted[Math.min(sorted.length - 1, idx)];
+}
+
+export function getJourneyPercentiles(filter: FilterState): PercentileRow[] {
+  const orders = filterOrders(filter);
+  const delivered = orders.filter((o) => o.deliveredTs);
+
+  // Time1: scan đơn đầu - checkin ~ approximated by 5-30 phút random
+  const time1Arr = orders.map((o) => {
+    const seed = o.orderId.charCodeAt(o.orderId.length - 1);
+    return 10 + (seed % 35);
+  });
+
+  // Time2: kết thúc phiên - scan đầu ~ 10-50 phút
+  const time2Arr = orders.map((o) => {
+    const seed = o.orderId.charCodeAt(o.orderId.length - 2);
+    return 15 + (seed % 45);
+  });
+
+  // Lead time E2E (h)
+  const leadE2e = delivered.map(
+    (o) => (new Date(o.deliveredTs!).getTime() - new Date(o.createdTs).getTime()) / 3600000,
+  );
+
+  const t1 = time1Arr.sort((a, b) => a - b);
+  const t2 = time2Arr.sort((a, b) => a - b);
+  const e2e = leadE2e.sort((a, b) => a - b);
+
+  return [
+    {
+      metric: "Time 1 (scan đơn đầu)",
+      p50: percentile(t1, 0.5),
+      p90: percentile(t1, 0.9),
+      p99: percentile(t1, 0.99),
+      unit: "phút",
+    },
+    {
+      metric: "Time 2 (kết thúc phiên)",
+      p50: percentile(t2, 0.5),
+      p90: percentile(t2, 0.9),
+      p99: percentile(t2, 0.99),
+      unit: "phút",
+    },
+    {
+      metric: "Lead time E2E",
+      p50: round1(percentile(e2e, 0.5)),
+      p90: round1(percentile(e2e, 0.9)),
+      p99: round1(percentile(e2e, 0.99)),
+      unit: "h",
+    },
+  ];
+}
+
+export type FinalStatusMixRow = {
+  status: "delivered" | "returned" | "in_progress" | "lost";
+  label: string;
+  count: number;
+  share: number;
+  color: string;
+};
+
+export function getJourneyFinalStatusMix(filter: FilterState): FinalStatusMixRow[] {
+  const orders = filterOrders(filter);
+  const total = orders.length || 1;
+  const counts = {
+    delivered: orders.filter((o) => o.finalStatus === "delivered").length,
+    returned: orders.filter((o) => o.finalStatus === "returned").length,
+    in_progress: orders.filter((o) => o.finalStatus === "in_progress").length,
+    lost: orders.filter((o) => o.finalStatus === "lost").length,
+  };
+  return [
+    {
+      status: "delivered",
+      label: "Giao thành công",
+      count: counts.delivered,
+      share: round1(pct(counts.delivered, total)),
+      color: "#10b981",
+    },
+    {
+      status: "returned",
+      label: "Hoàn người gửi",
+      count: counts.returned,
+      share: round1(pct(counts.returned, total)),
+      color: "#f59e0b",
+    },
+    {
+      status: "in_progress",
+      label: "Đang xử lý",
+      count: counts.in_progress,
+      share: round1(pct(counts.in_progress, total)),
+      color: "#6b7280",
+    },
+    {
+      status: "lost",
+      label: "Thất lạc / hư hỏng",
+      count: counts.lost,
+      share: round1(pct(counts.lost, total)),
+      color: "#ef4444",
+    },
+  ];
+}
+
+export type JourneyOrderRow = {
+  mvd: string;
+  createdAt: string;
+  province: string;
+  channel: string;
+  loaiHang: string;
+  slaDays: number;
+  currentState: string;
+  finalStatus: string;
+  leadtimeH: number;
+};
+
+export function getJourneyTopOrders(filter: FilterState, limit = 30): JourneyOrderRow[] {
+  const orders = filterOrders(filter)
+    .slice(0, 5000) // tránh O(n) lớn
+    .filter((o) => o.deliveredTs || o.finalStatus !== "in_progress");
+  return orders.slice(0, limit).map((o) => ({
+    mvd: o.orderId,
+    createdAt: o.createdTs,
+    province: o.provinceCode,
+    channel: o.channel,
+    loaiHang: o.loaiHang,
+    slaDays: o.slaDays,
+    currentState: o.currentState,
+    finalStatus: o.finalStatus,
+    leadtimeH: o.deliveredTs
+      ? round1(
+          (new Date(o.deliveredTs).getTime() - new Date(o.createdTs).getTime()) /
+            3600000,
+        )
+      : 0,
+  }));
+}
+
+// =============================================================================
+// PHASE 4a — /stages (5 chặng vận hành)
+// =============================================================================
+
+export type StageKey = "fm" | "ktc-fw" | "lm" | "ktc-ret" | "return";
+
+export type StageMetricCard = {
+  stageKey: StageKey;
+  stageLabel: string;
+  throughput: number;
+  ltMedianH: number;
+  successRate: number;
+  status: Status;
+  activeNV: number;
+};
+
+export function getStageOverview(filter: FilterState): StageMetricCard[] {
+  const orders = filterOrders(filter);
+  const total = orders.length || 1;
+  const picked = orders.filter((o) => o.pickedTs);
+  const delivered = orders.filter((o) => o.finalStatus === "delivered");
+  const returned = orders.filter((o) => o.finalStatus === "returned");
+
+  const ltPick =
+    picked.length > 0
+      ? round1(
+          picked.reduce(
+            (a, o) =>
+              a +
+              (new Date(o.pickedTs!).getTime() - new Date(o.createdTs).getTime()) /
+                3600000,
+            0,
+          ) / picked.length,
+        )
+      : 0;
+  const ltE2e =
+    delivered.length > 0
+      ? round1(
+          delivered.reduce(
+            (a, o) =>
+              a +
+              (new Date(o.deliveredTs!).getTime() -
+                new Date(o.createdTs).getTime()) /
+                3600000,
+            0,
+          ) / delivered.length,
+        )
+      : 0;
+
+  return [
+    {
+      stageKey: "fm",
+      stageLabel: "First-mile (Lấy hàng)",
+      throughput: picked.length,
+      ltMedianH: ltPick,
+      successRate: round1(pct(picked.length, total)),
+      status:
+        picked.length / total >= 0.95 ? "green" : picked.length / total >= 0.88 ? "amber" : "red",
+      activeNV: 480 + Math.floor(picked.length / 100),
+    },
+    {
+      stageKey: "ktc-fw",
+      stageLabel: "KTC đi (Forward)",
+      throughput: Math.round(picked.length * 0.985),
+      ltMedianH: round1(ltE2e * 0.45),
+      successRate: 97.5,
+      status: "green",
+      activeNV: 260,
+    },
+    {
+      stageKey: "lm",
+      stageLabel: "Last-mile (Giao)",
+      throughput: delivered.length + returned.length,
+      ltMedianH: round1(ltE2e * 0.4),
+      successRate: round1(pct(delivered.length, delivered.length + returned.length || 1)),
+      status:
+        delivered.length / (delivered.length + returned.length || 1) >= 0.9
+          ? "green"
+          : "amber",
+      activeNV: 1450,
+    },
+    {
+      stageKey: "ktc-ret",
+      stageLabel: "KTC về (Return)",
+      throughput: returned.length,
+      ltMedianH: round1(ltE2e * 0.3),
+      successRate: 93,
+      status: "green",
+      activeNV: 95,
+    },
+    {
+      stageKey: "return",
+      stageLabel: "Trả hàng",
+      throughput: Math.round(returned.length * 0.92),
+      ltMedianH: round1(ltE2e * 0.25),
+      successRate: 88,
+      status: returned.length > total * 0.1 ? "amber" : "green",
+      activeNV: 320,
+    },
+  ];
+}
+
+export type StageBreakdownRow = {
+  bcOrKtc: string;
+  type: "BC" | "KTC";
+  region: string;
+  throughput: number;
+  ltMedianH: number;
+  successRate: number;
+  status: Status;
+};
+
+export function getStageBreakdown(
+  filter: FilterState,
+  stageKey: StageKey,
+): StageBreakdownRow[] {
+  const orders = filterOrders(filter);
+  const isFirstMile = stageKey === "fm";
+
+  // Group by BC for FM/LM, by KTC for KTC stages
+  const map = new Map<string, { count: number; success: number; ltSum: number; ltN: number }>();
+  for (const o of orders) {
+    const node = isFirstMile ? o.bcLayCode : stageKey === "lm" ? o.bcGiaoCode : o.ktcCode;
+    if (!node) continue;
+    let cur = map.get(node);
+    if (!cur) {
+      cur = { count: 0, success: 0, ltSum: 0, ltN: 0 };
+      map.set(node, cur);
+    }
+    cur.count += 1;
+    if (o.finalStatus === "delivered") cur.success += 1;
+    if (o.deliveredTs) {
+      cur.ltSum +=
+        (new Date(o.deliveredTs).getTime() - new Date(o.createdTs).getTime()) /
+        3600000;
+      cur.ltN += 1;
+    }
+  }
+
+  const rows: StageBreakdownRow[] = [];
+  for (const [code, agg] of map.entries()) {
+    const sr = round1(pct(agg.success, agg.count));
+    rows.push({
+      bcOrKtc: code,
+      type: code.startsWith("BC-") ? "BC" : "KTC",
+      region: code.split("-")[1] ?? "—",
+      throughput: agg.count,
+      ltMedianH: agg.ltN > 0 ? round1(agg.ltSum / agg.ltN) : 0,
+      successRate: sr,
+      status: sr >= 90 ? "green" : sr >= 85 ? "amber" : "red",
+    });
+  }
+  return rows.sort((a, b) => b.throughput - a.throughput).slice(0, 50);
+}
+
+// =============================================================================
+// PHASE 4b — /routing extras
+// =============================================================================
+
+export type ChannelLayerFlow = {
+  channel: string;
+  channelLabel: string;
+  ordersTotal: number;
+  changedWh: number;
+  newAddrChangedWh: number;
+};
+
+export function getRoutingChannelFlow(filter: FilterState): ChannelLayerFlow[] {
+  const orders = filterOrders(filter);
+  const channels: { code: string; label: string }[] = [
+    { code: "tts", label: "TTS (TikTok)" },
+    { code: "spe", label: "SPE (Shopee)" },
+    { code: "sme", label: "SME" },
+    { code: "ka", label: "KA" },
+    { code: "b2b", label: "B2B" },
+    { code: "cb", label: "Cross-border" },
+  ];
+
+  return channels.map((c) => {
+    const channelOrders = orders.filter((o) => o.channel === c.code);
+    return {
+      channel: c.code,
+      channelLabel: c.label,
+      ordersTotal: channelOrders.length,
+      changedWh: channelOrders.filter((o) => o.isChangedWarehouse).length,
+      newAddrChangedWh: channelOrders.filter(
+        (o) => o.isChangedWarehouse && o.phuongIsNew,
+      ).length,
+    };
+  });
+}
+
+export type RevertReasonRow = {
+  key: string;
+  label: string;
+  share: number;
+  count: number;
+  color: string;
+};
+
+export function getRevertReasons(filter: FilterState): RevertReasonRow[] {
+  const orders = filterOrders(filter);
+  const reverted = orders.filter((o) => o.isChangedWarehouse);
+  const total = reverted.length || 1;
+  // Mock split — 66% vận hành, còn lại GAP
+  return [
+    {
+      key: "ops-bc-closed",
+      label: "BC nhận đóng / quá tải",
+      share: round1(pct(Math.round(total * 0.28), total)),
+      count: Math.round(total * 0.28),
+      color: "#dc2626",
+    },
+    {
+      key: "ops-routing-rule",
+      label: "Sai routing rule",
+      share: round1(pct(Math.round(total * 0.22), total)),
+      count: Math.round(total * 0.22),
+      color: "#f97316",
+    },
+    {
+      key: "ops-address-error",
+      label: "Sai mapping địa chỉ",
+      share: round1(pct(Math.round(total * 0.16), total)),
+      count: Math.round(total * 0.16),
+      color: "#f59e0b",
+    },
+    {
+      key: "service-unavail",
+      label: "Service không hỗ trợ vùng",
+      share: round1(pct(Math.round(total * 0.08), total)),
+      count: Math.round(total * 0.08),
+      color: "#84B26A",
+    },
+    {
+      key: "other-gap",
+      label: "Khác [GAP công thức]",
+      share: round1(pct(Math.round(total * 0.26), total)),
+      count: Math.round(total * 0.26),
+      color: "#6b7280",
+    },
+  ];
+}
+
+export type DoiKhoCompare = {
+  newAddress: number;
+  oldAddress: number;
+  overall: number;
+  hnNewAddress: number;
+  hcmNewAddress: number;
+};
+
+export function getDoiKhoCompare(filter: FilterState): DoiKhoCompare {
+  const orders = filterOrders(filter);
+  const newAddr = orders.filter((o) => o.phuongIsNew);
+  const oldAddr = orders.filter((o) => !o.phuongIsNew);
+  const hnNew = orders.filter((o) => o.phuongIsNew && o.provinceCode === "HNI");
+  const hcmNew = orders.filter((o) => o.phuongIsNew && o.provinceCode === "HCM");
+
+  return {
+    newAddress: round1(pct(newAddr.filter((o) => o.isChangedWarehouse).length, newAddr.length)),
+    oldAddress: round1(pct(oldAddr.filter((o) => o.isChangedWarehouse).length, oldAddr.length)),
+    overall: round1(pct(orders.filter((o) => o.isChangedWarehouse).length, orders.length || 1)),
+    hnNewAddress: round1(pct(hnNew.filter((o) => o.isChangedWarehouse).length, hnNew.length || 1)),
+    hcmNewAddress: round1(pct(hcmNew.filter((o) => o.isChangedWarehouse).length, hcmNew.length || 1)),
+  };
+}
+
+// =============================================================================
+// PHASE 5a — /network scorecard
+// =============================================================================
+
+export type RegionScorecardRow = {
+  regionCode: RegionCode;
+  regionName: string;
+  totalOrders: number;
+  ontimeNetwork: number;
+  costPerKg: number;
+  pctTC: number;
+  hangVeBc4Ca: number;
+  doiKho: number;
+  status: Status;
+};
+
+export function getRegionScorecard(filter: FilterState): RegionScorecardRow[] {
+  const regions: { code: RegionCode; name: string }[] = [
+    { code: "bac", name: "Miền Bắc" },
+    { code: "trung", name: "Miền Trung" },
+    { code: "nam", name: "Miền Nam" },
+  ];
+  return regions.map((r) => {
+    const sub: FilterState = { ...filter, regionCode: r.code };
+    const orders = filterOrders(sub);
+    const orderIds = new Set(orders.map((o) => o.orderId));
+    const trips = filterTrips(sub);
+    const ontime = computeOntimeNetwork(orders);
+    const cpk = computeCostPerKg(trips);
+    const tc = computePctTc(orderIds);
+    const h4 = computeHangVeBc4Ca(orders);
+    const dk = computeDoiKhoOverall(orders);
+    const stat = worstStatus(
+      statusFromValue(KPI.ontimeNetwork, ontime),
+      statusFromValue(KPI.pctTC, tc),
+      statusFromValue(KPI.hangVeBc4Ca, h4),
+    );
+    return {
+      regionCode: r.code,
+      regionName: r.name,
+      totalOrders: orders.length,
+      ontimeNetwork: ontime,
+      costPerKg: cpk,
+      pctTC: tc,
+      hangVeBc4Ca: h4,
+      doiKho: dk,
+      status: stat,
+    };
+  });
+}
+
+export type KtcScorecardRow = {
+  ktcCode: string;
+  ktcName: string;
+  region: RegionCode;
+  ordersIn: number;
+  ordersOut: number;
+  ltAvgH: number;
+  fillRateKg: number;
+  status: Status;
+};
+
+export function getKtcScorecard(filter: FilterState): KtcScorecardRow[] {
+  const orders = filterOrders(filter);
+  const trips = filterTrips(filter);
+
+  const ordersByKtc = new Map<string, FactOrder[]>();
+  for (const o of orders) {
+    if (!ordersByKtc.has(o.ktcCode)) ordersByKtc.set(o.ktcCode, []);
+    ordersByKtc.get(o.ktcCode)!.push(o);
+  }
+
+  const tripsByKtc = new Map<string, FactTrip[]>();
+  for (const t of trips) {
+    if (t.ktcCode) {
+      if (!tripsByKtc.has(t.ktcCode)) tripsByKtc.set(t.ktcCode, []);
+      tripsByKtc.get(t.ktcCode)!.push(t);
+    }
+  }
+
+  const rows: KtcScorecardRow[] = [];
+  for (const [code, os] of ordersByKtc.entries()) {
+    const ts = tripsByKtc.get(code) ?? [];
+    const region = (os[0]?.regionCode ?? "bac") as RegionCode;
+    const fillKg =
+      ts.length > 0 ? round1((ts.reduce((a, b) => a + b.fillRateKg, 0) / ts.length) * 100) : 0;
+    const finishedOrders = os.filter((o) => o.deliveredTs);
+    const ltAvg =
+      finishedOrders.length > 0
+        ? round1(
+            finishedOrders.reduce(
+              (a, o) =>
+                a +
+                (new Date(o.deliveredTs!).getTime() -
+                  new Date(o.createdTs).getTime()) /
+                  3600000,
+              0,
+            ) / finishedOrders.length,
+          )
+        : 0;
+    rows.push({
+      ktcCode: code,
+      ktcName: code.replace(/-/g, " "),
+      region,
+      ordersIn: os.length,
+      ordersOut: Math.round(os.length * 0.97),
+      ltAvgH: ltAvg,
+      fillRateKg: fillKg,
+      status:
+        fillKg >= 75 && ltAvg < 48 ? "green" : fillKg >= 60 && ltAvg < 60 ? "amber" : "red",
+    });
+  }
+  return rows.sort((a, b) => b.ordersIn - a.ordersIn);
+}
+
+// =============================================================================
+// PHASE 5b — /transport
+// =============================================================================
+
+export type TransportKpis = {
+  ontimeTrip: number;
+  fillRateKg: number;
+  fillRateOrder: number;
+  emptyMileage: number;
+  avgCostPerKm: number;
+  totalTrips: number;
+  totalParcels: number;
+};
+
+export function getTransportKpis(filter: FilterState): TransportKpis {
+  const trips = filterTrips(filter);
+  const totalKm = trips.reduce((a, b) => a + b.totalKm, 0);
+  const totalCost = trips.reduce((a, b) => a + b.cost, 0);
+  return {
+    ontimeTrip: computeOntimeVanTai(trips),
+    fillRateKg: computeFillRateKg(trips),
+    fillRateOrder: computeFillRateOrder(trips),
+    emptyMileage: computeEmptyMileage(trips),
+    avgCostPerKm: totalKm > 0 ? Math.round(totalCost / totalKm) : 0,
+    totalTrips: trips.length,
+    totalParcels: trips.reduce((a, b) => a + b.parcels, 0),
+  };
+}
+
+export type TransportTripRow = {
+  tripId: string;
+  type: string;
+  origin: string;
+  dest: string;
+  planDepart: string;
+  fillRateKg: number;
+  parcels: number;
+  cost: number;
+  vehicle: string;
+  carrier: string;
+  status: Status;
+};
+
+export function getTransportTrips(filter: FilterState, limit = 50): TransportTripRow[] {
+  const trips = filterTrips(filter)
+    .slice(0, 5000)
+    .sort((a, b) => b.planDepart.localeCompare(a.planDepart))
+    .slice(0, limit);
+
+  return trips.map((t) => {
+    const planMs = new Date(t.planArrive).getTime();
+    const actMs = new Date(t.actualArrive).getTime();
+    const late = (actMs - planMs) / 60000;
+    return {
+      tripId: t.tripId,
+      type: t.type.toUpperCase(),
+      origin: t.originCode,
+      dest: t.destCode,
+      planDepart: t.planDepart,
+      fillRateKg: round1(t.fillRateKg * 100),
+      parcels: t.parcels,
+      cost: t.cost,
+      vehicle: t.vehicleType,
+      carrier: t.carrier,
+      status: late <= 15 ? "green" : late <= 60 ? "amber" : "red",
+    };
+  });
+}
+
+export type TransportCarrierRow = {
+  carrier: string;
+  trips: number;
+  ontime: number;
+  fillRateKg: number;
+  avgCost: number;
+  status: Status;
+};
+
+export function getTransportByCarrier(filter: FilterState): TransportCarrierRow[] {
+  const trips = filterTrips(filter);
+  const carriers = ["internal", "tpl-a", "tpl-b", "tpl-c"];
+  return carriers.map((c) => {
+    const ts = trips.filter((t) => t.carrier === c);
+    const ontime = computeOntimeVanTai(ts);
+    const fk = computeFillRateKg(ts);
+    return {
+      carrier: c === "internal" ? "Nội bộ" : c.toUpperCase(),
+      trips: ts.length,
+      ontime,
+      fillRateKg: fk,
+      avgCost: ts.length > 0 ? Math.round(ts.reduce((a, b) => a + b.cost, 0) / ts.length) : 0,
+      status: statusFromValue(KPI.ontimeVanTai, ontime),
+    };
+  });
+}
+
+export type TransportRouteTypeRow = {
+  type: string;
+  trips: number;
+  fillRateKg: number;
+  avgKm: number;
+  emptyPct: number;
+};
+
+export function getTransportByRouteType(filter: FilterState): TransportRouteTypeRow[] {
+  const trips = filterTrips(filter);
+  const types = [
+    { key: "fm", label: "FM (BC → KTC)" },
+    { key: "lh", label: "LH (KTC ↔ KTC)" },
+    { key: "lm", label: "LM (KTC → BC)" },
+    { key: "rt", label: "RT (Return)" },
+  ];
+  return types.map((t) => {
+    const ts = trips.filter((x) => x.type === t.key);
+    return {
+      type: t.label,
+      trips: ts.length,
+      fillRateKg: computeFillRateKg(ts),
+      avgKm:
+        ts.length > 0 ? Math.round(ts.reduce((a, b) => a + b.totalKm, 0) / ts.length) : 0,
+      emptyPct: computeEmptyMileage(ts),
+    };
+  });
+}
