@@ -14,6 +14,7 @@ import {
   getKtcs,
   getProvinces,
 } from "./mock-data";
+import { Delaunay } from "d3-delaunay";
 import { KPI, statusFromValue } from "./kpi-config";
 import { REGION_LABEL_VI } from "./types";
 import type {
@@ -2904,7 +2905,8 @@ export type TerritoryBc = {
   // GPS thật cho Leaflet
   lat: number;
   lng: number;
-  coverageKm: number;       // bán kính vùng phủ (km) → vẽ circle
+  coverageKm: number;       // bán kính tương đương (km)
+  cell: [number, number][]; // Voronoi cell polygon [lat,lng] — vùng phủ không trùng
   // Thuộc tính kho
   regionName: string;
   ktcCode: string;          // kho trực thuộc
@@ -3078,6 +3080,7 @@ export function getTerritoryMap(
       cx, cy,
       polygon: blobPolygon(rng, cx, cy, r),
       lat, lng, coverageKm,
+      cell: [] as [number, number][],
       regionName: REGION_LABEL_VI[b.regionCode],
       ktcCode: b.ktcCode,
       areaKm2,
@@ -3088,6 +3091,39 @@ export function getTerritoryMap(
       donLay, donGiao, donTrongKho, donSapVc, ontimeLay, ontimeGiao, status,
     };
   });
+
+  // === Voronoi tessellation: chia địa bàn thành các ô KHÔNG trùng nhau,
+  //     ngăn cách bởi border, shape bất quy tắc (giống ranh giới phường) ===
+  if (bcs.length >= 2) {
+    const lats = bcs.map((b) => b.lat);
+    const lngs = bcs.map((b) => b.lng);
+    const padLat = (Math.max(...lats) - Math.min(...lats)) * 0.18 + 0.02;
+    const padLng = (Math.max(...lngs) - Math.min(...lngs)) * 0.18 + 0.02;
+    const bounds: [number, number, number, number] = [
+      Math.min(...lngs) - padLng, // xmin (lng)
+      Math.min(...lats) - padLat, // ymin (lat)
+      Math.max(...lngs) + padLng, // xmax
+      Math.max(...lats) + padLat, // ymax
+    ];
+    // x = lng, y = lat
+    const delaunay = Delaunay.from(
+      bcs,
+      (b) => b.lng,
+      (b) => b.lat,
+    );
+    const voronoi = delaunay.voronoi(bounds);
+    bcs.forEach((b, i) => {
+      const poly = voronoi.cellPolygon(i);
+      if (!poly) return;
+      // poly: [[lng,lat], ...] → Leaflet cần [lat,lng]; jitter nhẹ cho tự nhiên
+      const jit = seededRand(b.bcCode + ":cell");
+      b.cell = poly.map(([lng, lat]) => {
+        const jl = (jit() - 0.5) * 0.004;
+        const jg = (jit() - 0.5) * 0.004;
+        return [lat + jl, lng + jg] as [number, number];
+      });
+    });
+  }
 
   return {
     provinceCode,

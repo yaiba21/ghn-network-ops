@@ -4,7 +4,7 @@ import { useState } from "react";
 import {
   MapContainer,
   TileLayer,
-  Circle,
+  Polygon,
   CircleMarker,
   Tooltip as LTooltip,
 } from "react-leaflet";
@@ -50,20 +50,22 @@ export function LeafletTerritoryMap({ data, height = 560 }: Props) {
               url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
             />
             {data.bcs.map((b) => {
+              if (b.cell.length < 3) return null;
               const isSel = activeBc === b.bcCode;
               return (
-                <Circle
-                  key={b.bcCode + "-c"}
-                  center={[b.lat, b.lng]}
-                  radius={b.coverageKm * 1000}
+                <Polygon
+                  key={b.bcCode + "-cell"}
+                  positions={b.cell}
                   pathOptions={{
-                    color: b.color,
+                    color: "#ffffff",
                     fillColor: b.color,
-                    fillOpacity: isSel ? 0.4 : 0.18,
-                    weight: isSel ? 2.5 : 1,
+                    fillOpacity: isSel ? 0.6 : 0.4,
+                    weight: isSel ? 3 : 1.5,
                   }}
                   eventHandlers={{ click: () => setActiveBc(b.bcCode) }}
-                />
+                >
+                  <LTooltip>{b.bcName}</LTooltip>
+                </Polygon>
               );
             })}
             {data.bcs.map((b) => (
@@ -85,8 +87,9 @@ export function LeafletTerritoryMap({ data, height = 560 }: Props) {
           </MapContainer>
         </div>
         <div className="text-[10px] text-[var(--color-text-muted)] mt-1">
-          Bản đồ thật (OpenStreetMap). Vòng tròn = vùng phủ ước lượng theo diện tích hoạt động.
-          Click BC để xem chi tiết. {data.bcs.length} BC tại {data.provinceName}.
+          Bản đồ thật (OpenStreetMap). Mỗi ô = địa bàn 1 BC (không trùng nhau,
+          ngăn bởi border — ước lượng kiểu Voronoi). Click ô để xem chi tiết.
+          {data.bcs.length} BC tại {data.provinceName}.
         </div>
       </div>
 

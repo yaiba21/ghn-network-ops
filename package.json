@@ -12,6 +12,7 @@
     "@types/leaflet": "^1.9.21",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "d3-delaunay": "^6.0.4",
     "date-fns": "^4.2.1",
     "leaflet": "^1.9.4",
     "lucide-react": "^1.16.0",
@@ -25,6 +26,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@types/d3-delaunay": "^6.0.4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
