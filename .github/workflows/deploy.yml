@@ -29,10 +29,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build Next.js (static export)
+      - name: Build Next.js (static export for GitHub Pages)
         run: npm run build
         env:
           NODE_ENV: production
+          GITHUB_PAGES: "1"
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

@@ -1,10 +1,11 @@
 import path from "node:path";
 import type { NextConfig } from "next";
 
-// GitHub Pages serves the repo under /<repo-name>/. Set basePath to match
-// so internal links + assets resolve correctly. For local dev (npm run dev)
-// we leave basePath empty.
-const isProd = process.env.NODE_ENV === "production";
+// Chỉ bật static export khi build cho GitHub Pages.
+// Vercel / Local dev không cần — để giữ API routes + dynamic features.
+//   GITHUB_PAGES=1 npm run build   → static export với basePath
+//   npm run build                  → Vercel-style server build
+const isGithubPages = process.env.GITHUB_PAGES === "1";
 const repoName = "ghn-network-ops";
 
 const nextConfig: NextConfig = {
@@ -12,15 +13,15 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: path.resolve(__dirname),
   },
-  // Static HTML export — works on any static host (GitHub Pages, S3, etc.).
-  output: "export",
-  // Required for GitHub Pages sub-path hosting.
-  basePath: isProd ? `/${repoName}` : "",
-  assetPrefix: isProd ? `/${repoName}/` : "",
-  // GitHub Pages serves /foo/ as /foo/index.html — trailingSlash matches that.
-  trailingSlash: true,
-  // next/image's default loader needs a Node server; disable for static export.
-  images: { unoptimized: true },
+  ...(isGithubPages
+    ? {
+        output: "export" as const,
+        basePath: `/${repoName}`,
+        assetPrefix: `/${repoName}/`,
+        trailingSlash: true,
+        images: { unoptimized: true },
+      }
+    : {}),
 };
 
 export default nextConfig;
