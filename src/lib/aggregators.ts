@@ -3312,3 +3312,42 @@ export function getTripDetail(tripId: string): TripDetail | null {
     stops,
   };
 }
+
+
+// =============================================================================
+// PHASE 11 — ORS: Engine resolve ở bước nào (routing layer breakdown)
+// =============================================================================
+
+export type EngineResolveLayer = {
+  key: string;
+  label: string;
+  pct: number;
+  color: string;
+};
+
+/**
+ * Engine routing resolve đơn ở layer nào:
+ *  - Chỉ định BC: có config gán BC trực tiếp (tốt nhất)
+ *  - Bộ BC: rơi vào rule bộ BC / polygon
+ *  - Mặc định: fallback default → % cao = thiếu config BC, dễ revert sớm
+ */
+export function getEngineResolveLayers(filter: FilterState): EngineResolveLayer[] {
+  const orders = filterOrders(filter);
+  // Deterministic theo filter + tỉ lệ đổi kho (đổi kho cao → mặc định cao)
+  const dk = computeDoiKhoOverall(orders);
+  const seed = `engine:${filter.from}:${filter.to}:${filter.regionCode ?? ""}:${filter.provinceCode ?? ""}`;
+  const rng = seededRand(seed);
+
+  // base 55/33/12, nhích theo đổi kho + noise nhỏ
+  let macDinh = round1(12 + (dk - 2) * 1.5 + (rng() - 0.5) * 4);
+  macDinh = Math.max(5, Math.min(30, macDinh));
+  let boBc = round1(33 + (rng() - 0.5) * 6);
+  boBc = Math.max(20, Math.min(40, boBc));
+  const chiDinh = round1(100 - macDinh - boBc);
+
+  return [
+    { key: "chi-dinh", label: "Chỉ định BC", pct: chiDinh, color: "#3f8a6e" },
+    { key: "bo-bc", label: "Bộ BC", pct: boBc, color: "#6dc59f" },
+    { key: "mac-dinh", label: "Mặc định", pct: macDinh, color: "#e8a33d" },
+  ];
+}

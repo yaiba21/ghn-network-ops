@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { useFilter } from "@/components/filter/FilterContext";
 import {
   getDoiKhoBreakdown,
+  getEngineResolveLayers,
   getRevertReasons,
   getRoutingAlerts,
   getRoutingChannelFlow,
@@ -38,6 +39,7 @@ export default function RoutingPage() {
   const revertReasons = useMemo(() => getRevertReasons(filter), [filter]);
   const topBcs = useMemo(() => getTopRevertBcs(filter, 20), [filter]);
   const doiKhoBreakdown = useMemo(() => getDoiKhoBreakdown(filter), [filter]);
+  const engineLayers = useMemo(() => getEngineResolveLayers(filter), [filter]);
   const alerts = useMemo(() => getRoutingAlerts(filter), [filter]);
   const updated = dataUpdatedAt();
 
@@ -108,13 +110,44 @@ export default function RoutingPage() {
         </div>
       </Card>
 
-      {/* === So sánh theo vùng === */}
-      <Card
-        title={`So sánh ${regionRows.length} vùng — phân tuyến + đổi kho`}
-        subtitle="Vùng nào đổi kho cao nhất / phân tuyến đúng thấp nhất. Sort cột để tìm vùng cần ưu tiên xây rule."
-      >
-        <DataTable columns={regionColumns} data={regionRows} rowKey={(r) => r.regionCode} />
-      </Card>
+      {/* === Engine resolve ở bước nào + So sánh vùng === */}
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
+        <Card
+          title="Engine resolve ở bước nào"
+          subtitle="ORS phân giải đơn ở layer nào khi tạo đơn."
+        >
+          <div className="space-y-3">
+            {engineLayers.map((l) => (
+              <div key={l.key} className="flex items-center gap-3">
+                <div className="w-24 shrink-0 text-sm text-[var(--color-text)]">
+                  {l.label}
+                </div>
+                <div className="flex-1 h-3 bg-[var(--color-border-soft)] rounded-full overflow-hidden">
+                  <div
+                    className="h-full rounded-full transition-[width] duration-500"
+                    style={{ width: `${l.pct}%`, backgroundColor: l.color }}
+                  />
+                </div>
+                <div className="w-12 shrink-0 text-right text-sm font-semibold tabular-nums">
+                  {formatPct(l.pct, 0)}
+                </div>
+              </div>
+            ))}
+            <div className="text-xs text-[var(--color-text-muted)] pt-1">
+              % &quot;mặc định&quot; cao = thiếu config BC → nguồn revert sớm
+            </div>
+          </div>
+        </Card>
+
+        <div className="xl:col-span-2">
+          <Card
+            title={`So sánh ${regionRows.length} vùng — phân tuyến + đổi kho`}
+            subtitle="Vùng nào đổi kho cao nhất / phân tuyến đúng thấp nhất. Sort cột để tìm vùng cần ưu tiên xây rule."
+          >
+            <DataTable columns={regionColumns} data={regionRows} rowKey={(r) => r.regionCode} />
+          </Card>
+        </div>
+      </div>
 
       {/* === Channel flow — 3 cột đổi kho === */}
       <Card
