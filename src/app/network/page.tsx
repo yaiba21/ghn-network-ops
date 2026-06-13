@@ -9,8 +9,8 @@ import {
   getBcSubMetricsByRegion,
   getKtcScorecard,
   getNetworkAlerts,
-  getNetworkGraph,
   getNetworkSubMetricsByRegion,
+  getLaneMatrix,
   getOverviewNorthStar,
   getRegionBcStates,
   getRegionScorecard,
@@ -25,7 +25,7 @@ import { Card } from "@/components/ui/Card";
 import { KpiCardFrom } from "@/components/ui/KpiCard";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import { StatusBadge } from "@/components/ui/StatusBadge";
-import { NetworkGraph } from "@/components/ui/NetworkGraph";
+import { OdMatrix } from "@/components/ui/OdMatrix";
 import { TerritoryMap } from "@/components/ui/TerritoryMap";
 import { REGION_LABEL_VI, type RegionCode } from "@/lib/types";
 import {
@@ -48,7 +48,7 @@ export default function NetworkPage() {
     () => getNetworkSubMetricsByRegion(filter),
     [filter],
   );
-  const graph = useMemo(() => getNetworkGraph(filter), [filter]);
+  const laneMatrix = useMemo(() => getLaneMatrix(filter, 10), [filter]);
   const alerts = useMemo(() => getNetworkAlerts(filter), [filter]);
   const updated = dataUpdatedAt();
 
@@ -178,12 +178,12 @@ export default function NetworkPage() {
         />
       </Card>
 
-      {/* === Network graph KTC + lanes === */}
+      {/* === Lane OD matrix === */}
       <Card
-        title="Network graph — KTC + Lanes"
-        subtitle="Node = KTC (size theo throughput), edge = lane KTC↔KTC (màu theo ontime, độ dày theo số trip)."
+        title="Ma trận lane KTC ↔ KTC (Origin–Destination)"
+        subtitle="Hàng = KTC đi, cột = KTC đến. Toggle giữa số trip (đậm = nhiều) và ontime (đỏ = trễ) để tìm lane bận / lane nghẽn."
       >
-        <NetworkGraph nodes={graph.nodes} edges={graph.edges} />
+        <OdMatrix data={laneMatrix} />
       </Card>
 
       {/* === Phân chia địa bàn BC (territory map) === */}

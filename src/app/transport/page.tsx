@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import { X } from "lucide-react";
 import { useFilter } from "@/components/filter/FilterContext";
 import {
   getLaneCodesForFilter,
@@ -11,6 +12,7 @@ import {
   getTransportKpis,
   getTransportMap,
   getTransportTrips,
+  getTripDetail,
 } from "@/lib/aggregators";
 import { dataUpdatedAt } from "@/lib/mock-data";
 import { KPI, statusFromValue } from "@/lib/kpi-config";
@@ -18,6 +20,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { FilterBar } from "@/components/filter/FilterBar";
 import { AlertBanner } from "@/components/ui/AlertBanner";
 import { VietnamMap } from "@/components/ui/VietnamMap";
+import { TripTimeline } from "@/components/ui/TripTimeline";
 import { DimensionSelect } from "@/components/filter/DimensionSelect";
 import { Card } from "@/components/ui/Card";
 import { DataTable, type Column } from "@/components/ui/DataTable";
@@ -43,6 +46,13 @@ export default function TransportPage() {
   const map = useMemo(() => getTransportMap(filter, 14), [filter]);
   const alerts = useMemo(() => getTransportAlerts(filter), [filter]);
   const updated = dataUpdatedAt();
+
+  // Trip được chọn → xem các điểm chạm
+  const [selectedTrip, setSelectedTrip] = useState<string | null>(null);
+  const tripDetail = useMemo(
+    () => (selectedTrip ? getTripDetail(selectedTrip) : null),
+    [selectedTrip],
+  );
 
   return (
     <div className="space-y-4">
@@ -125,7 +135,7 @@ export default function TransportPage() {
       {/* === Trip realtime === */}
       <Card
         title="Bảng chuyến realtime — Top 50 mới nhất"
-        subtitle="Sort theo cột để tìm chuyến trễ / fill rate thấp / cost cao."
+        subtitle="Bấm 1 chuyến để xem các điểm chạm (qua BC/KTC nào, timestamp, thời lượng)."
       >
         <DataTable
           columns={tripColumns}
@@ -134,8 +144,28 @@ export default function TransportPage() {
           searchable
           searchPlaceholder="Tìm trip ID / origin / dest / NCC..."
           pageSize={20}
+          onRowClick={(r) => setSelectedTrip(r.tripId)}
         />
       </Card>
+
+      {/* === Trip detail timeline === */}
+      {tripDetail && (
+        <Card
+          title={`Hành trình chuyến ${tripDetail.tripId}`}
+          subtitle="Các điểm chạm theo thứ tự: BC/KTC, giờ đến/rời, thời gian dừng, tổng thời lượng tích luỹ."
+          actions={
+            <button
+              type="button"
+              onClick={() => setSelectedTrip(null)}
+              className="inline-flex items-center gap-1 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+            >
+              <X className="w-3.5 h-3.5" /> Đóng
+            </button>
+          }
+        >
+          <TripTimeline detail={tripDetail} />
+        </Card>
+      )}
 
       {/* === Carriers + Route types === */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">

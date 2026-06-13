@@ -3044,3 +3044,184 @@ export function getTerritoryMap(
     bcs, totalLay, totalGiao, totalKho, totalSapVc,
   };
 }
+
+
+// =============================================================================
+// PHASE 10 — Network OD matrix (lane KTC×KTC)
+// =============================================================================
+
+export type OdMatrixData = {
+  ktcs: { code: string; label: string; region: RegionCode }[];
+  cells: ({ trips: number; ontime: number; parcels: number } | null)[][];
+  maxTrips: number;
+};
+
+export function getLaneMatrix(filter: FilterState, topN = 10): OdMatrixData {
+  const trips = filterTrips(filter).filter((t) => t.type === "lh");
+  const ktcList = getKtcs();
+  const activity = new Map<string, number>();
+  for (const t of trips) {
+    activity.set(t.originCode, (activity.get(t.originCode) ?? 0) + 1);
+    activity.set(t.destCode, (activity.get(t.destCode) ?? 0) + 1);
+  }
+  const topKtc = ktcList
+    .filter((k) => activity.has(k.code))
+    .sort((a, b) => (activity.get(b.code) ?? 0) - (activity.get(a.code) ?? 0))
+    .slice(0, topN);
+  const codeIdx = new Map(topKtc.map((k, i) => [k.code, i]));
+
+  const agg = new Map<string, { trips: number; ontimeCount: number; parcels: number }>();
+  for (const t of trips) {
+    if (!codeIdx.has(t.originCode) || !codeIdx.has(t.destCode)) continue;
+    const key = `${t.originCode}|${t.destCode}`;
+    let cur = agg.get(key);
+    if (!cur) {
+      cur = { trips: 0, ontimeCount: 0, parcels: 0 };
+      agg.set(key, cur);
+    }
+    cur.trips += 1;
+    cur.parcels += t.parcels;
+    const late = (new Date(t.actualArrive).getTime() - new Date(t.planArrive).getTime()) / 60000;
+    if (late <= 15) cur.ontimeCount += 1;
+  }
+
+  let maxTrips = 1;
+  const cells = topKtc.map((o) =>
+    topKtc.map((d) => {
+      const v = agg.get(`${o.code}|${d.code}`);
+      if (!v || v.trips === 0) return null;
+      maxTrips = Math.max(maxTrips, v.trips);
+      return { trips: v.trips, ontime: round1(pct(v.ontimeCount, v.trips)), parcels: v.parcels };
+    }),
+  );
+
+  return {
+    ktcs: topKtc.map((k) => ({ code: k.code, label: k.code.replace("-KTC", "·"), region: k.regionCode })),
+    cells,
+    maxTrips,
+  };
+}
+
+// =============================================================================
+// PHASE 10 — Transport: trip stops (điểm chạm) + timeline
+// =============================================================================
+
+export type TripStop = {
+  order: number;
+  code: string;
+  name: string;
+  type: "BC" | "KTC";
+  role: string;
+  arriveTs: string;
+  departTs: string;
+  dwellMin: number;
+  cumulativeMin: number;
+  status: Status;
+};
+
+export type TripDetail = {
+  tripId: string;
+  type: string;
+  vehicle: string;
+  carrier: string;
+  parcels: number;
+  totalKm: number;
+  cost: number;
+  planDepart: string;
+  actualDepart: string;
+  planArrive: string;
+  actualArrive: string;
+  totalDurationMin: number;
+  lateMin: number;
+  status: Status;
+  stops: TripStop[];
+};
+
+function ktcOrBcName(code: string): string {
+  const k = getKtcs().find((x) => x.code === code);
+  if (k) return k.name;
+  const b = getBcs().find((x) => x.code === code);
+  return b?.name ?? code;
+}
+
+function nodeKind(code: string): "BC" | "KTC" {
+  return code.startsWith("BC-") ? "BC" : "KTC";
+}
+
+export function getTripDetail(tripId: string): TripDetail | null {
+  const t = getFactTrips().find((x) => x.tripId === tripId);
+  if (!t) return null;
+
+  const departMs = new Date(t.actualDepart).getTime();
+  const arriveMs = new Date(t.actualArrive).getTime();
+  const totalMin = Math.round((arriveMs - departMs) / 60000);
+  const lateMin = Math.round(
+    (new Date(t.actualArrive).getTime() - new Date(t.planArrive).getTime()) / 60000,
+  );
+  const st: Status = lateMin <= 15 ? "green" : lateMin <= 60 ? "amber" : "red";
+
+  const rng = seededRand(tripId);
+  const chain: { code: string; role: string }[] = [];
+  if (t.type === "fm") {
+    chain.push({ code: t.originCode, role: "Điểm lấy (BC)" });
+    chain.push({ code: t.destCode, role: "Nhập KTC" });
+  } else if (t.type === "lm") {
+    chain.push({ code: t.originCode, role: "Xuất KTC" });
+    chain.push({ code: t.destCode, role: "Điểm giao (BC)" });
+  } else if (t.type === "rt") {
+    chain.push({ code: t.originCode, role: "Nhận hoàn (BC)" });
+    chain.push({ code: t.destCode, role: "Nhập KTC hoàn" });
+  } else {
+    chain.push({ code: t.originCode, role: "KTC xuất phát" });
+    const others = getKtcs().filter((k) => k.code !== t.originCode && k.code !== t.destCode);
+    if (others.length && rng() < 0.4) {
+      const mid = others[Math.floor(rng() * others.length)];
+      chain.push({ code: mid.code, role: "KTC trung chuyển" });
+    }
+    chain.push({ code: t.destCode, role: "KTC đích" });
+  }
+
+  const legCount = chain.length - 1;
+  const stops: TripStop[] = [];
+  let cursor = departMs;
+  for (let i = 0; i < chain.length; i++) {
+    const isLast = i === chain.length - 1;
+    const arrive = i === 0 ? departMs : cursor;
+    const dwellMin = isLast ? 0 : 10 + Math.floor(rng() * 30);
+    const depart = arrive + dwellMin * 60000;
+    stops.push({
+      order: i + 1,
+      code: chain[i].code,
+      name: ktcOrBcName(chain[i].code),
+      type: nodeKind(chain[i].code),
+      role: chain[i].role,
+      arriveTs: new Date(arrive).toISOString().slice(0, 19),
+      departTs: new Date(depart).toISOString().slice(0, 19),
+      dwellMin,
+      cumulativeMin: Math.round((depart - departMs) / 60000),
+      status: st,
+    });
+    if (!isLast) {
+      const legMin = Math.max(20, Math.round((totalMin - chain.length * 20) / Math.max(1, legCount)));
+      cursor = depart + legMin * 60000;
+    }
+  }
+
+  return {
+    tripId: t.tripId,
+    type: t.type.toUpperCase(),
+    vehicle: t.vehicleType,
+    carrier: t.carrier === "internal" ? "Nội bộ" : t.carrier.toUpperCase(),
+    parcels: t.parcels,
+    totalKm: t.totalKm,
+    cost: t.cost,
+    planDepart: t.planDepart,
+    actualDepart: t.actualDepart,
+    planArrive: t.planArrive,
+    actualArrive: t.actualArrive,
+    totalDurationMin: totalMin,
+    lateMin,
+    status: st,
+    stops,
+  };
+}
