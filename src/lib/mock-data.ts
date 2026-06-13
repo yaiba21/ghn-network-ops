@@ -96,50 +96,73 @@ const SPARKLINE_DAYS = 14;
 // HN + HCM chiếm ~35% tổng sản lượng (theo spec)
 // =======================================================================
 
+// 14 vùng GHN — mã 3 ký tự theo spec
 const REGIONS: Region[] = [
-  { code: "bac", name: "Miền Bắc" },
-  { code: "trung", name: "Miền Trung" },
-  { code: "nam", name: "Miền Nam" },
+  { code: "HNO", name: "Hà Nội" },
+  { code: "DSH", name: "Đồng bằng Sông Hồng" },
+  { code: "TNT", name: "Tây Nam Thủ đô" },
+  { code: "XBG", name: "Xứ Bắc Giang" },
+  { code: "TBB", name: "Tây Bắc Bộ" },
+  { code: "DBB", name: "Đông Bắc Bộ" },
+  { code: "BTB", name: "Bắc Trung Bộ" },
+  { code: "TTB", name: "Trung Trung Bộ" },
+  { code: "TNG", name: "Tây Nguyên" },
+  { code: "NTB", name: "Nam Trung Bộ" },
+  { code: "HCM", name: "Hồ Chí Minh" },
+  { code: "DNB", name: "Đông Nam Bộ" },
+  { code: "DCL", name: "ĐB Cửu Long" },
+  { code: "TNB", name: "Tây Nam Bộ" },
 ];
 
+// 34 tỉnh map vào 14 vùng GHN
 const PROVINCES: Province[] = [
-  // Bắc (12 tỉnh)
-  { code: "HNI", name: "Hà Nội", regionCode: "bac" },
-  { code: "HPG", name: "Hải Phòng", regionCode: "bac" },
-  { code: "QNH", name: "Quảng Ninh", regionCode: "bac" },
-  { code: "BNH", name: "Bắc Ninh", regionCode: "bac" },
-  { code: "HDG", name: "Hải Dương", regionCode: "bac" },
-  { code: "NDH", name: "Nam Định", regionCode: "bac" },
-  { code: "TNG", name: "Thái Nguyên", regionCode: "bac" },
-  { code: "HYE", name: "Hưng Yên", regionCode: "bac" },
-  { code: "BGI", name: "Bắc Giang", regionCode: "bac" },
-  { code: "VPC", name: "Vĩnh Phúc", regionCode: "bac" },
-  { code: "PTO", name: "Phú Thọ", regionCode: "bac" },
-  { code: "LSN", name: "Lạng Sơn", regionCode: "bac" },
-  // Trung (10 tỉnh)
-  { code: "THA", name: "Thanh Hoá", regionCode: "trung" },
-  { code: "NAN", name: "Nghệ An", regionCode: "trung" },
-  { code: "HTI", name: "Hà Tĩnh", regionCode: "trung" },
-  { code: "HUE", name: "Thừa Thiên Huế", regionCode: "trung" },
-  { code: "DNG", name: "Đà Nẵng", regionCode: "trung" },
-  { code: "QNM", name: "Quảng Nam", regionCode: "trung" },
-  { code: "QBI", name: "Quảng Bình", regionCode: "trung" },
-  { code: "KHA", name: "Khánh Hoà", regionCode: "trung" },
-  { code: "BDI", name: "Bình Định", regionCode: "trung" },
-  { code: "DLA", name: "Đắk Lắk", regionCode: "trung" },
-  // Nam (12 tỉnh)
-  { code: "HCM", name: "TP. Hồ Chí Minh", regionCode: "nam" },
-  { code: "BDG", name: "Bình Dương", regionCode: "nam" },
-  { code: "DNI", name: "Đồng Nai", regionCode: "nam" },
-  { code: "VTU", name: "Bà Rịa - Vũng Tàu", regionCode: "nam" },
-  { code: "LAN", name: "Long An", regionCode: "nam" },
-  { code: "CTO", name: "Cần Thơ", regionCode: "nam" },
-  { code: "TGG", name: "Tiền Giang", regionCode: "nam" },
-  { code: "AGG", name: "An Giang", regionCode: "nam" },
-  { code: "KGG", name: "Kiên Giang", regionCode: "nam" },
-  { code: "BTR", name: "Bến Tre", regionCode: "nam" },
-  { code: "STG", name: "Sóc Trăng", regionCode: "nam" },
-  { code: "TYI", name: "Tây Ninh", regionCode: "nam" },
+  // HNO — Hà Nội
+  { code: "HNI", name: "Hà Nội", regionCode: "HNO" },
+  // DSH — Đồng bằng Sông Hồng
+  { code: "HPG", name: "Hải Phòng", regionCode: "DSH" },
+  { code: "BNH", name: "Bắc Ninh", regionCode: "DSH" },
+  { code: "HDG", name: "Hải Dương", regionCode: "DSH" },
+  { code: "NDH", name: "Nam Định", regionCode: "DSH" },
+  { code: "HYE", name: "Hưng Yên", regionCode: "DSH" },
+  { code: "VPC", name: "Vĩnh Phúc", regionCode: "DSH" },
+  // XBG — Xứ Bắc Giang
+  { code: "BGI", name: "Bắc Giang", regionCode: "XBG" },
+  // TBB — Tây Bắc Bộ
+  { code: "PTO", name: "Phú Thọ", regionCode: "TBB" },
+  // DBB — Đông Bắc Bộ
+  { code: "QNH", name: "Quảng Ninh", regionCode: "DBB" },
+  { code: "TNG", name: "Thái Nguyên", regionCode: "DBB" },
+  { code: "LSN", name: "Lạng Sơn", regionCode: "DBB" },
+  // BTB — Bắc Trung Bộ
+  { code: "THA", name: "Thanh Hoá", regionCode: "BTB" },
+  { code: "NAN", name: "Nghệ An", regionCode: "BTB" },
+  { code: "HTI", name: "Hà Tĩnh", regionCode: "BTB" },
+  { code: "HUE", name: "Thừa Thiên Huế", regionCode: "BTB" },
+  { code: "QBI", name: "Quảng Bình", regionCode: "BTB" },
+  // TTB — Trung Trung Bộ
+  { code: "DNG", name: "Đà Nẵng", regionCode: "TTB" },
+  { code: "QNM", name: "Quảng Nam", regionCode: "TTB" },
+  { code: "BDI", name: "Bình Định", regionCode: "TTB" },
+  // TNG — Tây Nguyên
+  { code: "DLA", name: "Đắk Lắk", regionCode: "TNG" },
+  // NTB — Nam Trung Bộ
+  { code: "KHA", name: "Khánh Hoà", regionCode: "NTB" },
+  // HCM
+  { code: "HCM", name: "TP. Hồ Chí Minh", regionCode: "HCM" },
+  // DNB — Đông Nam Bộ
+  { code: "BDG", name: "Bình Dương", regionCode: "DNB" },
+  { code: "DNI", name: "Đồng Nai", regionCode: "DNB" },
+  { code: "VTU", name: "Bà Rịa - Vũng Tàu", regionCode: "DNB" },
+  { code: "TYI", name: "Tây Ninh", regionCode: "DNB" },
+  // DCL — Đồng bằng Cửu Long
+  { code: "LAN", name: "Long An", regionCode: "DCL" },
+  { code: "CTO", name: "Cần Thơ", regionCode: "DCL" },
+  { code: "TGG", name: "Tiền Giang", regionCode: "DCL" },
+  { code: "AGG", name: "An Giang", regionCode: "DCL" },
+  { code: "BTR", name: "Bến Tre", regionCode: "DCL" },
+  { code: "STG", name: "Sóc Trăng", regionCode: "DCL" },
+  // TNB — Tây Nam Bộ
+  { code: "KGG", name: "Kiên Giang", regionCode: "TNB" },
 ];
 
 /**
@@ -370,10 +393,22 @@ const KTC_PENALTY: Record<string, number> = {
   "NAN-KTC01": 0.9, // slower TAT
   "AGG-KTC01": 0.92,
 };
+// Penalty cho 14 vùng — vùng xa / địa lý khó có hiệu suất thấp hơn nhẹ.
 const REGION_PENALTY: Record<RegionCode, number> = {
-  bac: 1.0,
-  trung: 0.95,
-  nam: 1.0,
+  HNO: 1.02,
+  DSH: 1.00,
+  TNT: 0.95,
+  XBG: 0.97,
+  TBB: 0.92,    // Tây Bắc — địa hình khó
+  DBB: 0.96,
+  BTB: 0.95,
+  TTB: 0.96,
+  TNG: 0.93,    // Tây Nguyên
+  NTB: 0.97,
+  HCM: 1.02,
+  DNB: 1.00,
+  DCL: 0.97,
+  TNB: 0.94,
 };
 
 // =======================================================================
@@ -505,9 +540,12 @@ function kpiFromBase(
   const targetWeight = 0.35 * progress;
   v = v * (1 - targetWeight) + spec.target * targetWeight;
 
-  // Region penalty
-  if (filter.regionCode === "trung") {
-    v = spec.direction === "higher-better" ? v * 0.985 : v * 1.04;
+  // Region penalty — 14 vùng có hệ số khác nhau
+  if (filter.regionCode && filter.regionCode !== "all") {
+    const rp = REGION_PENALTY[filter.regionCode as RegionCode] ?? 1;
+    if (rp !== 1) {
+      v = spec.direction === "higher-better" ? v * rp : v * (2 - rp);
+    }
   }
 
   // KTC penalty
@@ -706,13 +744,9 @@ export function getOpsScorecardKpis(filter: FilterState): OpsScorecardRow[] {
   const hasGeoFilter =
     (filter.regionCode && filter.regionCode !== "all") || !!filter.provinceCode;
   const regionMul =
-    filter.regionCode === "trung"
-      ? 0.985
-      : filter.regionCode === "nam"
-        ? 1.005
-        : filter.regionCode === "bac"
-          ? 1.002
-          : 1;
+    filter.regionCode && filter.regionCode !== "all"
+      ? REGION_PENALTY[filter.regionCode as RegionCode] ?? 1
+      : 1;
   const provinceMul = filter.provinceCode ? 0.99 : 1;
   const offset = hasGeoFilter
     ? noise(
@@ -1688,12 +1722,23 @@ export function getOverviewTrends(filter: FilterState): OverviewTrends {
   return { otd, costPerParcel, volume, returnRate };
 }
 
-/** 3 regional rows — volume + 3 health metrics + worst-of overall health. */
+/** 14 regional rows — volume + 3 health metrics + worst-of overall health. */
 export function getRegionSnapshot(filter: FilterState): RegionSnapshotRow[] {
   const regions: { code: RegionCode; name: string; volShare: number }[] = [
-    { code: "bac", name: "Bắc", volShare: 0.38 },
-    { code: "trung", name: "Trung", volShare: 0.14 },
-    { code: "nam", name: "Nam", volShare: 0.48 },
+    { code: "HCM", name: "Hồ Chí Minh", volShare: 0.18 },
+    { code: "HNO", name: "Hà Nội", volShare: 0.17 },
+    { code: "DSH", name: "ĐB Sông Hồng", volShare: 0.12 },
+    { code: "DNB", name: "Đông Nam Bộ", volShare: 0.10 },
+    { code: "DCL", name: "ĐB Cửu Long", volShare: 0.09 },
+    { code: "DBB", name: "Đông Bắc Bộ", volShare: 0.06 },
+    { code: "BTB", name: "Bắc Trung Bộ", volShare: 0.07 },
+    { code: "TTB", name: "Trung Trung Bộ", volShare: 0.05 },
+    { code: "NTB", name: "Nam Trung Bộ", volShare: 0.04 },
+    { code: "TNB", name: "Tây Nam Bộ", volShare: 0.03 },
+    { code: "TNG", name: "Tây Nguyên", volShare: 0.03 },
+    { code: "XBG", name: "Xứ Bắc Giang", volShare: 0.02 },
+    { code: "TBB", name: "Tây Bắc Bộ", volShare: 0.02 },
+    { code: "TNT", name: "Tây Nam Thủ đô", volShare: 0.02 },
   ];
 
   const today = filter.to;
@@ -2280,8 +2325,15 @@ export function getProvinceCoverage(filter: FilterState): ProvinceCoverageRow[] 
   return PROVINCES.map((p) => {
     const weight =
       p.code === "HCM" ? 3.0 : p.code === "HNI" ? 2.6 : p.code === "DNG" ? 1.4 : 1.0;
+    // Coverage thấp hơn ở vùng xa, cao ở vùng metro.
     const baseCoverage =
-      p.regionCode === "trung" ? 91.4 : p.regionCode === "nam" ? 97.2 : 96.4;
+      p.regionCode === "HCM" || p.regionCode === "HNO"
+        ? 97.5
+        : p.regionCode === "DSH" || p.regionCode === "DNB"
+          ? 96.8
+          : p.regionCode === "TBB" || p.regionCode === "TNG"
+            ? 89
+            : 93;
     const coveredPct = round1(
       baseCoverage * (1 + noise(`cov:${p.code}:${filter.to}`, 0.012)),
     );

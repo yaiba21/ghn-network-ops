@@ -4,7 +4,62 @@
 
 export type Status = "green" | "amber" | "red";
 
-export type RegionCode = "bac" | "trung" | "nam";
+/**
+ * 14 vùng GHN theo spec — mã 3 ký tự.
+ * Đây là internal region grouping của GHN (≠ 3 miền Bắc/Trung/Nam đơn giản).
+ */
+export type RegionCode =
+  | "HNO"   // Hà Nội
+  | "DSH"   // Đồng bằng Sông Hồng
+  | "TNT"   // Tây Nam Thủ đô
+  | "XBG"   // Xứ Bắc Giang
+  | "TBB"   // Tây Bắc Bộ
+  | "DBB"   // Đông Bắc Bộ
+  | "BTB"   // Bắc Trung Bộ
+  | "TTB"   // Trung Trung Bộ
+  | "TNG"   // Tây Nguyên
+  | "NTB"   // Nam Trung Bộ
+  | "HCM"   // TP. Hồ Chí Minh
+  | "DNB"   // Đông Nam Bộ
+  | "DCL"   // Đồng bằng Cửu Long (ĐCL, tránh ký tự đặc biệt trong code)
+  | "TNB";  // Tây Nam Bộ
+
+export const REGION_LABEL_VI: Record<RegionCode, string> = {
+  HNO: "Hà Nội",
+  DSH: "Đồng bằng Sông Hồng",
+  TNT: "Tây Nam Thủ đô",
+  XBG: "Xứ Bắc Giang",
+  TBB: "Tây Bắc Bộ",
+  DBB: "Đông Bắc Bộ",
+  BTB: "Bắc Trung Bộ",
+  TTB: "Trung Trung Bộ",
+  TNG: "Tây Nguyên",
+  NTB: "Nam Trung Bộ",
+  HCM: "Hồ Chí Minh",
+  DNB: "Đông Nam Bộ",
+  DCL: "ĐB Cửu Long",
+  TNB: "Tây Nam Bộ",
+};
+
+/** Group 14 vùng → 3 miền lớn cho legacy display. */
+export type MienCode = "bac" | "trung" | "nam";
+
+export const REGION_TO_MIEN: Record<RegionCode, MienCode> = {
+  HNO: "bac",
+  DSH: "bac",
+  TNT: "bac",
+  XBG: "bac",
+  TBB: "bac",
+  DBB: "bac",
+  BTB: "trung",
+  TTB: "trung",
+  TNG: "trung",
+  NTB: "trung",
+  HCM: "nam",
+  DNB: "nam",
+  DCL: "nam",
+  TNB: "nam",
+};
 
 export type ServiceType = "standard" | "bulky" | "express";
 

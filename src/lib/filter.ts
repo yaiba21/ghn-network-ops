@@ -23,7 +23,23 @@ import type {
 const TODAY_ISO = "2026-05-20"; // mirrors mock-data TODAY
 
 const SERVICE_TYPES: ServiceType[] = ["standard", "bulky", "express"];
-const REGIONS: (RegionCode | "all")[] = ["all", "bac", "trung", "nam"];
+const REGIONS: (RegionCode | "all")[] = [
+  "all",
+  "HNO",
+  "DSH",
+  "TNT",
+  "XBG",
+  "TBB",
+  "DBB",
+  "BTB",
+  "TTB",
+  "TNG",
+  "NTB",
+  "HCM",
+  "DNB",
+  "DCL",
+  "TNB",
+];
 const GRANULARITIES: Granularity[] = ["daily", "weekly", "monthly"];
 const PRESETS: TimePreset[] = ["today", "week", "month", "custom"];
 const VEHICLES: (VehicleType | "all")[] = ["all", "truck", "container", "van"];

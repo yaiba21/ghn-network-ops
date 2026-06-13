@@ -16,6 +16,7 @@ import { DataTable, type Column } from "@/components/ui/DataTable";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { MetricBadge } from "@/components/ui/MetricBadge";
 import { cn, formatCompactInt, formatHours, formatPct, formatVND } from "@/lib/utils";
+import { REGION_LABEL_VI } from "@/lib/types";
 
 export default function NetworkPage() {
   const { filter } = useFilter();
@@ -210,8 +211,7 @@ const ktcColumns: Column<ReturnType<typeof getKtcScorecard>[number]>[] = [
     key: "region",
     label: "Vùng",
     sortable: true,
-    render: (r) =>
-      r.region === "bac" ? "Bắc" : r.region === "trung" ? "Trung" : "Nam",
+    render: (r) => REGION_LABEL_VI[r.region] ?? r.region,
   },
   {
     key: "ordersIn",

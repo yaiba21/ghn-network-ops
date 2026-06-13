@@ -564,12 +564,26 @@ export function getOverviewModuleHealth(filter: FilterState): ModuleHealth[] {
   return [firstMile, middleMile, lastMile, routing, transport];
 }
 
+// 14 vùng GHN theo spec — sort theo volume share ước lượng
+const HEATMAP_REGIONS: { code: RegionCode; name: string }[] = [
+  { code: "HCM", name: "Hồ Chí Minh" },
+  { code: "HNO", name: "Hà Nội" },
+  { code: "DSH", name: "ĐB Sông Hồng" },
+  { code: "DNB", name: "Đông Nam Bộ" },
+  { code: "DCL", name: "ĐB Cửu Long" },
+  { code: "BTB", name: "Bắc Trung Bộ" },
+  { code: "DBB", name: "Đông Bắc Bộ" },
+  { code: "TTB", name: "Trung Trung Bộ" },
+  { code: "NTB", name: "Nam Trung Bộ" },
+  { code: "TNG", name: "Tây Nguyên" },
+  { code: "TNB", name: "Tây Nam Bộ" },
+  { code: "XBG", name: "Xứ Bắc Giang" },
+  { code: "TBB", name: "Tây Bắc Bộ" },
+  { code: "TNT", name: "Tây Nam Thủ đô" },
+];
+
 export function getOverviewRegionHeatmap(filter: FilterState): HeatmapData {
-  const regions: { code: RegionCode; name: string }[] = [
-    { code: "bac", name: "Miền Bắc" },
-    { code: "trung", name: "Miền Trung" },
-    { code: "nam", name: "Miền Nam" },
-  ];
+  const regions = HEATMAP_REGIONS;
   const cols = ["Ontime Network", "Cost/kg", "%TC"];
 
   const cells: { row: string; col: string; value: number; status: Status }[] = [];
@@ -1294,11 +1308,7 @@ export type RegionScorecardRow = {
 };
 
 export function getRegionScorecard(filter: FilterState): RegionScorecardRow[] {
-  const regions: { code: RegionCode; name: string }[] = [
-    { code: "bac", name: "Miền Bắc" },
-    { code: "trung", name: "Miền Trung" },
-    { code: "nam", name: "Miền Nam" },
-  ];
+  const regions = HEATMAP_REGIONS;
   return regions.map((r) => {
     const sub: FilterState = { ...filter, regionCode: r.code };
     const orders = filterOrders(sub);
@@ -1360,7 +1370,7 @@ export function getKtcScorecard(filter: FilterState): KtcScorecardRow[] {
   const rows: KtcScorecardRow[] = [];
   for (const [code, os] of ordersByKtc.entries()) {
     const ts = tripsByKtc.get(code) ?? [];
-    const region = (os[0]?.regionCode ?? "bac") as RegionCode;
+    const region = (os[0]?.regionCode ?? "HNO") as RegionCode;
     const fillKg =
       ts.length > 0 ? round1((ts.reduce((a, b) => a + b.fillRateKg, 0) / ts.length) * 100) : 0;
     const finishedOrders = os.filter((o) => o.deliveredTs);

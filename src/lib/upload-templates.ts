@@ -341,12 +341,17 @@ const KTC_HEADERS = [
 ];
 
 const KTC_SAMPLE: (string | number)[][] = [
-  ["HCM-KTC01", "KTC TP. Hồ Chí Minh 01", "nam", 3200, 800, 1200, 4.5, 99.5],
-  ["HCM-KTC02", "KTC TP. Hồ Chí Minh 02", "nam", 2800, 700, 1100, 5.0, 99.4],
-  ["HNI-KTC01", "KTC Hà Nội 01", "bac", 3000, 750, 1150, 4.8, 99.5],
-  ["DNG-KTC01", "KTC Đà Nẵng 01", "trung", 1800, 600, 800, 6.0, 99.0],
-  ["BDG-KTC01", "KTC Bình Dương 01", "nam", 2400, 650, 900, 4.6, 99.5],
-  ["KHA-KTC01", "KTC Khánh Hoà 01", "trung", 1200, 900, 600, 9.5, 98.6],
+  ["HCM-KTC01", "KTC TP. Hồ Chí Minh 01", "HCM", 3200, 800, 1200, 4.5, 99.5],
+  ["HCM-KTC02", "KTC TP. Hồ Chí Minh 02", "HCM", 2800, 700, 1100, 5.0, 99.4],
+  ["HNI-KTC01", "KTC Hà Nội 01", "HNO", 3000, 750, 1150, 4.8, 99.5],
+  ["DNG-KTC01", "KTC Đà Nẵng 01", "TTB", 1800, 600, 800, 6.0, 99.0],
+  ["BDG-KTC01", "KTC Bình Dương 01", "DNB", 2400, 650, 900, 4.6, 99.5],
+  ["KHA-KTC01", "KTC Khánh Hoà 01", "NTB", 1200, 900, 600, 9.5, 98.6],
+];
+
+const VALID_REGION_CODES: string[] = [
+  "HNO", "DSH", "TNT", "XBG", "TBB", "DBB", "BTB",
+  "TTB", "TNG", "NTB", "HCM", "DNB", "DCL", "TNB",
 ];
 
 function parseKtcStatus(csv: string): ParseResult<KtcStatusRow> {
@@ -360,9 +365,9 @@ function parseKtcStatus(csv: string): ParseResult<KtcStatusRow> {
   rows.forEach((r, i) => {
     try {
       const region = r.region_code as RegionCode;
-      if (!["bac", "trung", "nam"].includes(region)) {
+      if (!VALID_REGION_CODES.includes(region)) {
         throw new Error(
-          `region_code phải là "bac" | "trung" | "nam", nhận: "${r.region_code}"`,
+          `region_code phải là 1 trong 14 vùng (HNO/DSH/TNT/XBG/TBB/DBB/BTB/TTB/TNG/NTB/HCM/DNB/DCL/TNB), nhận: "${r.region_code}"`,
         );
       }
       const sortAccuracy = toNumber(r.sort_accuracy, "sort_accuracy");
