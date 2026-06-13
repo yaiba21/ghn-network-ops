@@ -14,16 +14,19 @@ import {
   getOverviewNorthStar,
   getRegionBcStates,
   getRegionScorecard,
+  getTerritoryMap,
 } from "@/lib/aggregators";
-import { dataUpdatedAt } from "@/lib/mock-data";
+import { dataUpdatedAt, getProvinces } from "@/lib/mock-data";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { FilterBar } from "@/components/filter/FilterBar";
+import { DimensionSelect } from "@/components/filter/DimensionSelect";
 import { AlertBanner } from "@/components/ui/AlertBanner";
 import { Card } from "@/components/ui/Card";
 import { KpiCardFrom } from "@/components/ui/KpiCard";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { NetworkGraph } from "@/components/ui/NetworkGraph";
+import { TerritoryMap } from "@/components/ui/TerritoryMap";
 import { REGION_LABEL_VI, type RegionCode } from "@/lib/types";
 import {
   cn,
@@ -61,6 +64,19 @@ export default function NetworkPage() {
   const bcSubDrill = useMemo(
     () => (subDrillRegion ? getBcSubMetricsByRegion(filter, subDrillRegion, 50) : []),
     [filter, subDrillRegion],
+  );
+
+  // Territory map — chọn tỉnh để xem phân chia địa bàn BC
+  const provinceOpts = useMemo(
+    () => getProvinces().map((p) => ({ value: p.code, label: p.name })),
+    [],
+  );
+  const [territoryProvince, setTerritoryProvince] = useState<string>(
+    filter.provinceCode ?? "HCM",
+  );
+  const territory = useMemo(
+    () => getTerritoryMap(filter, territoryProvince),
+    [filter, territoryProvince],
   );
 
   return (
@@ -168,6 +184,25 @@ export default function NetworkPage() {
         subtitle="Node = KTC (size theo throughput), edge = lane KTC↔KTC (màu theo ontime, độ dày theo số trip)."
       >
         <NetworkGraph nodes={graph.nodes} edges={graph.edges} />
+      </Card>
+
+      {/* === Phân chia địa bàn BC (territory map) === */}
+      <Card
+        title="Phân chia địa bàn BC"
+        subtitle="Chọn tỉnh → xem phạm vi hoạt động từng BC. Hover vùng để xem đơn lấy/giao, đơn trong kho, sắp vận chuyển, ontime lấy + giao."
+        actions={
+          <DimensionSelect
+            label="Tỉnh / Thành"
+            value={territoryProvince}
+            options={provinceOpts}
+            onChange={(v) => v && setTerritoryProvince(v)}
+            allOptionLabel="Chọn tỉnh"
+            width={200}
+            searchable
+          />
+        }
+      >
+        <TerritoryMap data={territory} />
       </Card>
 
       {/* === Network sub-metrics dạng bảng theo vùng (drill BC) === */}

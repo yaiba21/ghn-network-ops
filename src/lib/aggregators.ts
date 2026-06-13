@@ -12,6 +12,7 @@ import {
   getFactPickups,
   getFactTrips,
   getKtcs,
+  getProvinces,
 } from "./mock-data";
 import { KPI, statusFromValue } from "./kpi-config";
 import type {
@@ -2885,4 +2886,161 @@ export function getTransportMap(
     .filter((r): r is MapTripRoute => r !== null);
 
   return { nodes, routes };
+}
+
+
+// =============================================================================
+// PHASE 9 — Territory map (phân chia địa bàn BC) cho /network
+// =============================================================================
+
+export type TerritoryBc = {
+  bcCode: string;
+  bcName: string;
+  color: string;
+  cx: number;
+  cy: number;
+  polygon: { x: number; y: number }[];
+  donLay: number;
+  donGiao: number;
+  donTrongKho: number;
+  donSapVc: number;
+  ontimeLay: number;
+  ontimeGiao: number;
+  status: Status;
+};
+
+export type TerritoryMapData = {
+  provinceCode: string;
+  provinceName: string;
+  bcs: TerritoryBc[];
+  totalLay: number;
+  totalGiao: number;
+  totalKho: number;
+  totalSapVc: number;
+};
+
+const TERRITORY_PALETTE = [
+  "#60a5fa", "#a78bfa", "#34d399", "#fbbf24", "#f87171",
+  "#f472b6", "#22d3ee", "#fb923c", "#4ade80", "#c084fc",
+  "#2dd4bf", "#facc15", "#fca5a5", "#93c5fd", "#86efac",
+  "#d8b4fe", "#fdba74", "#67e8f9", "#bef264", "#f9a8d4",
+];
+
+function seededRand(seed: string): () => number {
+  let h = 1779033703;
+  for (let i = 0; i < seed.length; i++) {
+    h = Math.imul(h ^ seed.charCodeAt(i), 3432918353);
+    h = (h << 13) | (h >>> 19);
+  }
+  let a = h >>> 0;
+  return () => {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function blobPolygon(
+  rng: () => number,
+  cx: number,
+  cy: number,
+  r: number,
+): { x: number; y: number }[] {
+  const pts: { x: number; y: number }[] = [];
+  const verts = 7 + Math.floor(rng() * 3);
+  for (let i = 0; i < verts; i++) {
+    const ang = (i / verts) * Math.PI * 2;
+    const rad = r * (0.7 + rng() * 0.6);
+    pts.push({
+      x: Math.max(0.02, Math.min(0.98, cx + rad * Math.cos(ang))),
+      y: Math.max(0.02, Math.min(0.98, cy + rad * Math.sin(ang) * 1.1)),
+    });
+  }
+  return pts;
+}
+
+export function getTerritoryMap(
+  filter: FilterState,
+  provinceCode: string,
+): TerritoryMapData {
+  const province = getProvinces().find((p) => p.code === provinceCode);
+  const bcsInProvince = getBcs().filter((b) => b.provinceCode === provinceCode);
+  const orders = filterOrders({ ...filter, provinceCode: undefined, bcCode: undefined });
+
+  const bcCodeSet = new Set(bcsInProvince.map((b) => b.code));
+  const layCount = new Map<string, number>();
+  const giaoCount = new Map<string, number>();
+  const giaoOntime = new Map<string, number>();
+  for (const o of orders) {
+    if (bcCodeSet.has(o.bcLayCode)) {
+      layCount.set(o.bcLayCode, (layCount.get(o.bcLayCode) ?? 0) + 1);
+    }
+    if (bcCodeSet.has(o.bcGiaoCode)) {
+      giaoCount.set(o.bcGiaoCode, (giaoCount.get(o.bcGiaoCode) ?? 0) + 1);
+      if (o.deliveredTs && o.deliveredTs <= o.promisedTs) {
+        giaoOntime.set(o.bcGiaoCode, (giaoOntime.get(o.bcGiaoCode) ?? 0) + 1);
+      }
+    }
+  }
+
+  const pickups = getFactPickups();
+  const layTotal = new Map<string, number>();
+  const layOntime = new Map<string, number>();
+  for (const p of pickups) {
+    if (!bcCodeSet.has(p.bcCode)) continue;
+    layTotal.set(p.bcCode, (layTotal.get(p.bcCode) ?? 0) + 1);
+    if (p.ltc) layOntime.set(p.bcCode, (layOntime.get(p.bcCode) ?? 0) + 1);
+  }
+
+  const n = bcsInProvince.length || 1;
+  const cols = Math.ceil(Math.sqrt(n * 1.4));
+  const rows = Math.ceil(n / cols);
+  const cellW = 1 / cols;
+  const cellH = 1 / rows;
+
+  let totalLay = 0, totalGiao = 0, totalKho = 0, totalSapVc = 0;
+
+  const bcs: TerritoryBc[] = bcsInProvince.map((b, i) => {
+    const rng = seededRand(b.code);
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    const cx = (col + 0.5) * cellW + (rng() - 0.5) * cellW * 0.5;
+    const cy = (row + 0.5) * cellH + (rng() - 0.5) * cellH * 0.5;
+    const r = Math.min(cellW, cellH) * (0.5 + rng() * 0.25);
+
+    const donLay = layCount.get(b.code) ?? 0;
+    const donGiao = giaoCount.get(b.code) ?? 0;
+    const donTrongKho = Math.round(donGiao * (0.08 + rng() * 0.1));
+    const donSapVc = Math.round(donLay * (0.12 + rng() * 0.12));
+    const ltTot = layTotal.get(b.code) ?? 0;
+    const ontimeLay = ltTot > 0 ? round1(pct(layOntime.get(b.code) ?? 0, ltTot)) : 0;
+    const ontimeGiao = donGiao > 0 ? round1(pct(giaoOntime.get(b.code) ?? 0, donGiao)) : 0;
+
+    totalLay += donLay;
+    totalGiao += donGiao;
+    totalKho += donTrongKho;
+    totalSapVc += donSapVc;
+
+    const status = worstStatus(
+      ontimeGiao >= 90 ? "green" : ontimeGiao >= 85 ? "amber" : "red",
+      ontimeLay >= 90 ? "green" : ontimeLay >= 85 ? "amber" : "red",
+    );
+
+    return {
+      bcCode: b.code,
+      bcName: b.name,
+      color: TERRITORY_PALETTE[i % TERRITORY_PALETTE.length],
+      cx, cy,
+      polygon: blobPolygon(rng, cx, cy, r),
+      donLay, donGiao, donTrongKho, donSapVc, ontimeLay, ontimeGiao, status,
+    };
+  });
+
+  return {
+    provinceCode,
+    provinceName: province?.name ?? provinceCode,
+    bcs, totalLay, totalGiao, totalKho, totalSapVc,
+  };
 }
