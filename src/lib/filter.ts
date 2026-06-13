@@ -5,13 +5,19 @@ import { addDays, parseISO, startOfMonth, startOfWeek } from "date-fns";
 import { defaultFilter } from "./mock-data";
 import { toISODate } from "./utils";
 import type {
+  CaCode,
+  Carrier,
+  ChannelCode,
   FilterState,
   Granularity,
+  LoaiBcCode,
+  LoaiHang,
+  LoaiTuyen,
   RegionCode,
   ServiceType,
+  SlaDays,
   TimePreset,
   VehicleType,
-  Carrier,
 } from "./types";
 
 const TODAY_ISO = "2026-05-20"; // mirrors mock-data TODAY
@@ -22,6 +28,24 @@ const GRANULARITIES: Granularity[] = ["daily", "weekly", "monthly"];
 const PRESETS: TimePreset[] = ["today", "week", "month", "custom"];
 const VEHICLES: (VehicleType | "all")[] = ["all", "truck", "container", "van"];
 const CARRIERS: (Carrier | "all")[] = ["all", "internal", "tpl-a", "tpl-b", "tpl-c"];
+
+// Phase 1 — Dimensions mới
+const CHANNELS_ALL: (ChannelCode | "all")[] = ["all", "tts", "spe", "sme", "ka", "b2b", "cb"];
+const LOAI_BCS_ALL: (LoaiBcCode | "all")[] = [
+  "all",
+  "hon-hop",
+  "chuyen-giao",
+  "chuyen-lay",
+  "b2b",
+  "gxt",
+  "hang-vua",
+  "khl",
+  "ahamove",
+];
+const CAS_ALL: (CaCode | "all")[] = ["all", "ca1", "ca2", "ca3"];
+const LOAI_HANGS_ALL: (LoaiHang | "all")[] = ["all", "standard", "bulky"];
+const LOAI_TUYENS_ALL: (LoaiTuyen | "all")[] = ["all", "noi-vung", "lien-vung"];
+const SLA_DAYS_ALL: (SlaDays | "all")[] = ["all", 1, 2, 3];
 
 export function presetToRange(preset: TimePreset): { from: string; to: string } {
   const today = parseISO(TODAY_ISO);
@@ -71,6 +95,27 @@ export function parseFilterFromParams(sp: URLSearchParams): FilterState {
   const car = sp.get("car") as Carrier | "all" | null;
   const validCar = car && CARRIERS.includes(car) ? car : "all";
 
+  // Phase 1 — new dimensions
+  const ch = sp.get("ch") as ChannelCode | "all" | null;
+  const validCh = ch && CHANNELS_ALL.includes(ch) ? ch : "all";
+
+  const lbc = sp.get("lbc") as LoaiBcCode | "all" | null;
+  const validLbc = lbc && LOAI_BCS_ALL.includes(lbc) ? lbc : "all";
+
+  const ca = sp.get("ca") as CaCode | "all" | null;
+  const validCa = ca && CAS_ALL.includes(ca) ? ca : "all";
+
+  const lh = sp.get("lh") as LoaiHang | "all" | null;
+  const validLh = lh && LOAI_HANGS_ALL.includes(lh) ? lh : "all";
+
+  const lt = sp.get("lt") as LoaiTuyen | "all" | null;
+  const validLt = lt && LOAI_TUYENS_ALL.includes(lt) ? lt : "all";
+
+  const slaRaw = sp.get("sla");
+  const slaNum =
+    slaRaw === "1" ? 1 : slaRaw === "2" ? 2 : slaRaw === "3" ? 3 : null;
+  const validSla: SlaDays | "all" = slaNum ?? "all";
+
   return {
     preset: validPreset,
     from,
@@ -85,6 +130,14 @@ export function parseFilterFromParams(sp: URLSearchParams): FilterState {
     laneCode: sp.get("lane") ?? undefined,
     vehicleType: validVeh,
     carrier: validCar,
+    // Phase 1
+    bcCode: sp.get("bc") ?? undefined,
+    channelCode: validCh,
+    loaiBc: validLbc,
+    caCode: validCa,
+    loaiHang: validLh,
+    loaiTuyen: validLt,
+    slaDays: validSla,
   };
 }
 
@@ -105,6 +158,14 @@ export function serializeFilter(filter: FilterState): URLSearchParams {
   if (filter.laneCode) sp.set("lane", filter.laneCode);
   if (filter.vehicleType && filter.vehicleType !== "all") sp.set("veh", filter.vehicleType);
   if (filter.carrier && filter.carrier !== "all") sp.set("car", filter.carrier);
+  // Phase 1
+  if (filter.bcCode) sp.set("bc", filter.bcCode);
+  if (filter.channelCode && filter.channelCode !== "all") sp.set("ch", filter.channelCode);
+  if (filter.loaiBc && filter.loaiBc !== "all") sp.set("lbc", filter.loaiBc);
+  if (filter.caCode && filter.caCode !== "all") sp.set("ca", filter.caCode);
+  if (filter.loaiHang && filter.loaiHang !== "all") sp.set("lh", filter.loaiHang);
+  if (filter.loaiTuyen && filter.loaiTuyen !== "all") sp.set("lt", filter.loaiTuyen);
+  if (filter.slaDays && filter.slaDays !== "all") sp.set("sla", String(filter.slaDays));
   return sp;
 }
 
@@ -127,6 +188,7 @@ export function patchFilter(prev: FilterState, patch: Partial<FilterState>): Fil
   if ("provinceCode" in patch && patch.provinceCode !== prev.provinceCode) {
     next.districtCode = undefined;
     next.wardCode = undefined;
+    next.bcCode = undefined;
   }
   if ("districtCode" in patch && patch.districtCode !== prev.districtCode) {
     next.wardCode = undefined;

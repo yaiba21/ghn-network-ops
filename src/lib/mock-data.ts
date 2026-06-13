@@ -64,6 +64,21 @@ import type {
   RoutingDecisionRow,
   ReRouteTriggerRow,
   ProvinceCoverageRow,
+  // Phase 1 — dimensions + fact tables
+  Bc,
+  CaCode,
+  ChannelCode,
+  FactDelivery,
+  FactOrder,
+  FactPickup,
+  FactTrip,
+  FinalStatus,
+  LoaiBcCode,
+  LoaiHang,
+  LoaiTuyen,
+  OrderState,
+  SlaDays,
+  TripType,
 } from "./types";
 
 // =======================================================================
@@ -77,7 +92,8 @@ const HISTORY_DAYS = 365;
 const SPARKLINE_DAYS = 14;
 
 // =======================================================================
-// 1. Geo dimensions (3 regions → 20 provinces → 60 districts → 200 wards)
+// 1. Geo dimensions (3 vùng → 34 tỉnh → ~3 quận/tỉnh → ~200 phường)
+// HN + HCM chiếm ~35% tổng sản lượng (theo spec)
 // =======================================================================
 
 const REGIONS: Region[] = [
@@ -87,6 +103,7 @@ const REGIONS: Region[] = [
 ];
 
 const PROVINCES: Province[] = [
+  // Bắc (12 tỉnh)
   { code: "HNI", name: "Hà Nội", regionCode: "bac" },
   { code: "HPG", name: "Hải Phòng", regionCode: "bac" },
   { code: "QNH", name: "Quảng Ninh", regionCode: "bac" },
@@ -94,20 +111,79 @@ const PROVINCES: Province[] = [
   { code: "HDG", name: "Hải Dương", regionCode: "bac" },
   { code: "NDH", name: "Nam Định", regionCode: "bac" },
   { code: "TNG", name: "Thái Nguyên", regionCode: "bac" },
+  { code: "HYE", name: "Hưng Yên", regionCode: "bac" },
+  { code: "BGI", name: "Bắc Giang", regionCode: "bac" },
+  { code: "VPC", name: "Vĩnh Phúc", regionCode: "bac" },
+  { code: "PTO", name: "Phú Thọ", regionCode: "bac" },
+  { code: "LSN", name: "Lạng Sơn", regionCode: "bac" },
+  // Trung (10 tỉnh)
   { code: "THA", name: "Thanh Hoá", regionCode: "trung" },
   { code: "NAN", name: "Nghệ An", regionCode: "trung" },
+  { code: "HTI", name: "Hà Tĩnh", regionCode: "trung" },
+  { code: "HUE", name: "Thừa Thiên Huế", regionCode: "trung" },
   { code: "DNG", name: "Đà Nẵng", regionCode: "trung" },
   { code: "QNM", name: "Quảng Nam", regionCode: "trung" },
+  { code: "QBI", name: "Quảng Bình", regionCode: "trung" },
   { code: "KHA", name: "Khánh Hoà", regionCode: "trung" },
+  { code: "BDI", name: "Bình Định", regionCode: "trung" },
+  { code: "DLA", name: "Đắk Lắk", regionCode: "trung" },
+  // Nam (12 tỉnh)
   { code: "HCM", name: "TP. Hồ Chí Minh", regionCode: "nam" },
   { code: "BDG", name: "Bình Dương", regionCode: "nam" },
   { code: "DNI", name: "Đồng Nai", regionCode: "nam" },
+  { code: "VTU", name: "Bà Rịa - Vũng Tàu", regionCode: "nam" },
   { code: "LAN", name: "Long An", regionCode: "nam" },
   { code: "CTO", name: "Cần Thơ", regionCode: "nam" },
   { code: "TGG", name: "Tiền Giang", regionCode: "nam" },
   { code: "AGG", name: "An Giang", regionCode: "nam" },
   { code: "KGG", name: "Kiên Giang", regionCode: "nam" },
+  { code: "BTR", name: "Bến Tre", regionCode: "nam" },
+  { code: "STG", name: "Sóc Trăng", regionCode: "nam" },
+  { code: "TYI", name: "Tây Ninh", regionCode: "nam" },
 ];
+
+/**
+ * Trọng số sản lượng theo tỉnh — HN + HCM chiếm ~35%.
+ * Dùng để random theo phân phối volume thực tế khi sinh fact_order.
+ */
+const PROVINCE_VOLUME_WEIGHT: Record<string, number> = {
+  HCM: 18,
+  HNI: 17,
+  // Tier 2: các thành phố lớn / tỉnh có khu công nghiệp
+  BDG: 5,
+  DNI: 4,
+  HPG: 4,
+  DNG: 3,
+  BNH: 3,
+  HDG: 2.5,
+  CTO: 2.5,
+  // Tier 3: các tỉnh trung bình
+  VTU: 2,
+  HYE: 2,
+  QNH: 2,
+  BGI: 1.8,
+  VPC: 1.8,
+  LAN: 1.8,
+  TGG: 1.5,
+  AGG: 1.5,
+  KGG: 1.5,
+  NDH: 1.5,
+  TNG: 1.5,
+  THA: 1.5,
+  NAN: 1.5,
+  HUE: 1.5,
+  KHA: 1.5,
+  BDI: 1.3,
+  HTI: 1.2,
+  QNM: 1.2,
+  QBI: 1.0,
+  PTO: 1.0,
+  LSN: 0.8,
+  DLA: 1.0,
+  BTR: 1.2,
+  STG: 1.2,
+  TYI: 1.5,
+};
 
 // district pool — pick 3 per province
 const DISTRICT_POOL: Record<string, string[]> = {
@@ -131,6 +207,21 @@ const DISTRICT_POOL: Record<string, string[]> = {
   TGG: ["Mỹ Tho", "Cai Lậy", "Gò Công"],
   AGG: ["Long Xuyên", "Châu Đốc", "Tân Châu"],
   KGG: ["Rạch Giá", "Hà Tiên", "Phú Quốc"],
+  // 14 tỉnh mới (Phase 1)
+  HYE: ["TP. Hưng Yên", "Mỹ Hào", "Văn Lâm"],
+  BGI: ["TP. Bắc Giang", "Việt Yên", "Lạng Giang"],
+  VPC: ["TP. Vĩnh Yên", "Phúc Yên", "Bình Xuyên"],
+  PTO: ["TP. Việt Trì", "Phú Thọ", "Lâm Thao"],
+  LSN: ["TP. Lạng Sơn", "Cao Lộc", "Hữu Lũng"],
+  HTI: ["TP. Hà Tĩnh", "Kỳ Anh", "Thạch Hà"],
+  HUE: ["TP. Huế", "Hương Thuỷ", "Hương Trà"],
+  QBI: ["TP. Đồng Hới", "Lệ Thuỷ", "Bố Trạch"],
+  BDI: ["TP. Quy Nhơn", "An Nhơn", "Phù Cát"],
+  DLA: ["TP. Buôn Ma Thuột", "Buôn Hồ", "Krông Pắk"],
+  VTU: ["Vũng Tàu", "Bà Rịa", "Phú Mỹ"],
+  BTR: ["TP. Bến Tre", "Châu Thành", "Mỏ Cày Bắc"],
+  STG: ["TP. Sóc Trăng", "Vĩnh Châu", "Mỹ Tú"],
+  TYI: ["TP. Tây Ninh", "Hoà Thành", "Trảng Bàng"],
 };
 
 const DISTRICTS: District[] = PROVINCES.flatMap((p) =>
@@ -2208,4 +2299,642 @@ export function getProvinceCoverage(filter: FilterState): ProvinceCoverageRow[] 
       status,
     };
   });
+}
+
+
+// =======================================================================
+// ║                          PHASE 1 — EXTENSIONS                        ║
+// ║  BC (1.200) · Channels · Loại BC · Ca · Fact tables (30k đơn)        ║
+// ║  Tách rời với getters cũ — chưa thay thế, dùng song song              ║
+// =======================================================================
+
+
+// -----------------------------------------------------------------------
+// Helper: weighted random pick (sum không cần = 1)
+// -----------------------------------------------------------------------
+function weightedPick<T>(rng: () => number, items: { value: T; weight: number }[]): T {
+  const total = items.reduce((a, b) => a + b.weight, 0);
+  let r = rng() * total;
+  for (const it of items) {
+    r -= it.weight;
+    if (r <= 0) return it.value;
+  }
+  return items[items.length - 1].value;
+}
+
+function pickOne<T>(rng: () => number, items: T[]): T {
+  return items[Math.floor(rng() * items.length)];
+}
+
+// -----------------------------------------------------------------------
+// Phase 1 — Channels (6) + Loại BC (8) + Ca (3)
+// -----------------------------------------------------------------------
+
+const CHANNELS: ChannelCode[] = ["tts", "spe", "sme", "ka", "b2b", "cb"];
+
+/** Phân phối channel theo volume — TTS + SPE chiếm phần lớn. */
+const CHANNEL_WEIGHT: { value: ChannelCode; weight: number }[] = [
+  { value: "tts", weight: 28 },
+  { value: "spe", weight: 25 },
+  { value: "sme", weight: 28 },
+  { value: "ka", weight: 10 },
+  { value: "b2b", weight: 6 },
+  { value: "cb", weight: 3 },
+];
+
+const LOAI_BC_LIST: LoaiBcCode[] = [
+  "hon-hop",
+  "chuyen-giao",
+  "chuyen-lay",
+  "b2b",
+  "gxt",
+  "hang-vua",
+  "khl",
+  "ahamove",
+];
+
+const LOAI_BC_WEIGHT: { value: LoaiBcCode; weight: number }[] = [
+  { value: "hon-hop", weight: 50 },
+  { value: "chuyen-giao", weight: 15 },
+  { value: "chuyen-lay", weight: 10 },
+  { value: "b2b", weight: 8 },
+  { value: "gxt", weight: 7 },
+  { value: "hang-vua", weight: 4 },
+  { value: "khl", weight: 3 },
+  { value: "ahamove", weight: 3 },
+];
+
+const CA_LIST: CaCode[] = ["ca1", "ca2", "ca3"];
+
+// -----------------------------------------------------------------------
+// Phase 1 — BCS (~1.200 bưu cục)
+// HCM + HNI mỗi tỉnh ~200 BC, 32 tỉnh còn lại trung bình ~25 BC
+// -----------------------------------------------------------------------
+
+const BC_COUNT_BY_PROVINCE: Record<string, number> = {
+  HCM: 200,
+  HNI: 200,
+};
+
+// Phân BC còn lại theo trọng số volume
+{
+  const remaining = PROVINCES.filter((p) => !BC_COUNT_BY_PROVINCE[p.code]);
+  const totalWeight = remaining.reduce(
+    (a, p) => a + (PROVINCE_VOLUME_WEIGHT[p.code] ?? 1),
+    0,
+  );
+  const totalBcRemaining = 800;
+  for (const p of remaining) {
+    const w = PROVINCE_VOLUME_WEIGHT[p.code] ?? 1;
+    BC_COUNT_BY_PROVINCE[p.code] = Math.max(8, Math.round((w / totalWeight) * totalBcRemaining));
+  }
+}
+
+const BCS: Bc[] = (() => {
+  const rngLoai = seedrandom(MASTER_SEED + ":bc-loai");
+  const out: Bc[] = [];
+  for (const p of PROVINCES) {
+    const count = BC_COUNT_BY_PROVINCE[p.code] ?? 25;
+    // Mỗi BC gắn với KTC chính gần nhất (cùng province nếu có, không thì KTC đầu region)
+    const ktcInProvince = KTCS.filter((k) => k.provinceCode === p.code);
+    const ktcInRegion = KTCS.filter((k) => k.regionCode === p.regionCode);
+    const defaultKtc = ktcInProvince[0]?.code ?? ktcInRegion[0]?.code ?? KTCS[0].code;
+    for (let i = 1; i <= count; i++) {
+      out.push({
+        code: `BC-${p.code}-${String(i).padStart(3, "0")}`,
+        name: `BC ${p.name} ${String(i).padStart(3, "0")}`,
+        provinceCode: p.code,
+        regionCode: p.regionCode,
+        ktcCode: defaultKtc,
+        loaiBc: weightedPick(rngLoai, LOAI_BC_WEIGHT),
+      });
+    }
+  }
+  return out;
+})();
+
+// -----------------------------------------------------------------------
+// Phase 1 — Shops (cohort cho pattern shop size effect)
+// ~600 shops, 60% small / 35% medium / 5% large
+// -----------------------------------------------------------------------
+
+type Shop = {
+  id: string;
+  sizeBucket: "small" | "medium" | "large";
+  provinceCode: string;
+  preferredChannel: ChannelCode;
+};
+
+const SHOPS: Shop[] = (() => {
+  const rng = seedrandom(MASTER_SEED + ":shops");
+  const out: Shop[] = [];
+  const provinceWeights = PROVINCES.map((p) => ({
+    value: p.code,
+    weight: PROVINCE_VOLUME_WEIGHT[p.code] ?? 1,
+  }));
+  for (let i = 0; i < 600; i++) {
+    const r = rng();
+    const sizeBucket = r < 0.6 ? "small" : r < 0.95 ? "medium" : "large";
+    out.push({
+      id: `S${String(i + 1).padStart(5, "0")}`,
+      sizeBucket,
+      provinceCode: weightedPick(rng, provinceWeights),
+      preferredChannel: weightedPick(rng, CHANNEL_WEIGHT),
+    });
+  }
+  return out;
+})();
+
+// -----------------------------------------------------------------------
+// Phase 1 — FACT_ORDER (30.000 đơn / 30 ngày gần nhất)
+// Embed các pattern theo spec:
+//   1. Tết drop (~67% ontime)
+//   2. Shop nhỏ % không gán cao (~25%)
+//   3. HN & HCM đổi kho mới gấp ~2x
+//   4. Bulky/liên vùng leadtime dài hơn
+//   5. final_status: 88% delivered / 8% returned / 3% in_progress / 1% lost
+//   6. attempt: 80% lần 1, 15% lần 2, 5% lần 3
+// -----------------------------------------------------------------------
+
+const FACT_ORDER_DAYS = 30;
+const FACT_ORDER_TARGET = 30_000;
+
+function isTetPeriod(iso: string): boolean {
+  // Tết 2026 Bính Ngọ: 17/2/2026 (mùng 1). Pre-Tết spike + drop ~7 ngày trước/sau.
+  const md = iso.slice(5);
+  return md >= "02-10" && md <= "02-23";
+}
+
+function isPeakSale(iso: string): boolean {
+  const md = iso.slice(5);
+  return md === "10-10" || md === "11-11" || md === "12-12";
+}
+
+/** Sinh fact_order với seedrandom — gọi 1 lần khi module load. */
+const FACT_ORDERS: FactOrder[] = (() => {
+  const rng = seedrandom(MASTER_SEED + ":fact-order");
+  const out: FactOrder[] = [];
+  const provinceWeights = PROVINCES.map((p) => ({
+    value: p.code,
+    weight: PROVINCE_VOLUME_WEIGHT[p.code] ?? 1,
+  }));
+
+  // Lấy 30 ngày gần nhất từ TODAY
+  const recentDays = DAYS.slice(-FACT_ORDER_DAYS);
+  const totalMultiplier = recentDays.reduce((a, d) => a + d.multiplier, 0);
+
+  for (let i = 0; i < FACT_ORDER_TARGET; i++) {
+    // Chọn ngày theo multiplier (volume cao = nhiều đơn hơn)
+    let r = rng() * totalMultiplier;
+    let day = recentDays[0];
+    for (const d of recentDays) {
+      r -= d.multiplier;
+      if (r <= 0) {
+        day = d;
+        break;
+      }
+    }
+
+    const shop = SHOPS[Math.floor(rng() * SHOPS.length)];
+    const channel = rng() < 0.7 ? shop.preferredChannel : weightedPick(rng, CHANNEL_WEIGHT);
+
+    // Sender province (theo shop) + receiver province (random theo trọng số volume)
+    const senderProvinceCode = shop.provinceCode;
+    const senderProvince = PROVINCES.find((p) => p.code === senderProvinceCode)!;
+    const receiverProvinceCode = weightedPick(rng, provinceWeights);
+    const receiverProvince = PROVINCES.find((p) => p.code === receiverProvinceCode)!;
+
+    // BC lấy + BC giao
+    const sendersBcs = BCS.filter((b) => b.provinceCode === senderProvinceCode);
+    const receiversBcs = BCS.filter((b) => b.provinceCode === receiverProvinceCode);
+    const bcLay = pickOne(rng, sendersBcs);
+    const bcGiao = pickOne(rng, receiversBcs);
+
+    const loaiTuyen: LoaiTuyen =
+      senderProvince.regionCode === receiverProvince.regionCode ? "noi-vung" : "lien-vung";
+
+    // KTC trung gian: của BC giao (last KTC trước khi về BC giao)
+    const ktcCode = bcGiao.ktcCode;
+
+    // Phường mới/cũ: 20% mới (consistent với spec "is_new_to_address")
+    const phuongIsNew = rng() < 0.2;
+
+    // Loại hàng: 85% standard, 15% bulky
+    const loaiHang: LoaiHang = rng() < 0.85 ? "standard" : "bulky";
+
+    // SLA days
+    let slaDays: SlaDays;
+    if (loaiTuyen === "noi-vung") {
+      slaDays = rng() < 0.8 ? 1 : 2;
+    } else {
+      slaDays = rng() < 0.5 ? 2 : 3;
+    }
+
+    // Weight + COD
+    const weightKg =
+      loaiHang === "bulky"
+        ? 5 + rng() * 25
+        : 0.3 + rng() * 2.7;
+    const hasCod = rng() < 0.4;
+    const cod = hasCod ? Math.round(100_000 + rng() * 400_000) : 0;
+
+    // is_changed_warehouse — phụ thuộc phuong + province
+    let changeRate: number;
+    if (phuongIsNew) {
+      changeRate =
+        senderProvinceCode === "HNI"
+          ? 0.17
+          : senderProvinceCode === "HCM"
+            ? 0.14
+            : 0.06;
+    } else {
+      changeRate = 0.03;
+    }
+    const isChangedWarehouse = rng() < changeRate;
+
+    // Timestamps
+    const createdHour = Math.floor(rng() * 24);
+    const createdMin = Math.floor(rng() * 60);
+    const createdTs = `${day.date}T${String(createdHour).padStart(2, "0")}:${String(createdMin).padStart(2, "0")}:00`;
+    const createdMs = new Date(createdTs).getTime();
+
+    // promised: created + sla_days * 24h
+    const promisedMs = createdMs + slaDays * 24 * 3600 * 1000;
+    const promisedTs = new Date(promisedMs).toISOString().slice(0, 19);
+
+    // final_status — 88/8/3/1
+    // Adjust by patterns:
+    //   - Tết period: tỷ lệ returned cao hơn (12%) và in_progress cao (5%)
+    //   - Shop nhỏ: % không gán cao → % in_progress cao
+    //   - Bulky/liên vùng: returned + lost cao hơn nhẹ
+    let pDelivered = 0.88;
+    let pReturned = 0.08;
+    let pInProgress = 0.03;
+    let pLost = 0.01;
+    if (isTetPeriod(day.date)) {
+      pDelivered = 0.78;
+      pReturned = 0.12;
+      pInProgress = 0.08;
+      pLost = 0.02;
+    }
+    if (shop.sizeBucket === "small") {
+      pInProgress += 0.04;
+      pDelivered -= 0.04;
+    }
+    if (loaiHang === "bulky" || loaiTuyen === "lien-vung") {
+      pReturned += 0.02;
+      pDelivered -= 0.02;
+    }
+
+    let finalStatus: FinalStatus;
+    const rs = rng();
+    if (rs < pDelivered) finalStatus = "delivered";
+    else if (rs < pDelivered + pReturned) finalStatus = "returned";
+    else if (rs < pDelivered + pReturned + pInProgress) finalStatus = "in_progress";
+    else finalStatus = "lost";
+
+    // current_state map theo final_status (simplified)
+    let currentState: OrderState;
+    let pickedTs: string | undefined;
+    let deliveredTs: string | undefined;
+
+    if (finalStatus === "delivered") {
+      currentState = "DELIVER_IN_TRIP";
+      // picked: created + lead time ~1.5-5h
+      const pickLeadH = 1.5 + rng() * 3.5;
+      pickedTs = new Date(createdMs + pickLeadH * 3600 * 1000).toISOString().slice(0, 19);
+      // delivered: created + leadtime E2E (P50 36h, P90 60h, P99 90h)
+      // Adjust by loaiTuyen + bulky + Tết
+      const baseHours = loaiTuyen === "lien-vung" ? 48 : 24;
+      let leadH = baseHours + rng() * 24; // ~24-72h
+      if (loaiHang === "bulky") leadH *= 1.3;
+      if (isTetPeriod(day.date)) leadH *= 1.5;
+      deliveredTs = new Date(createdMs + leadH * 3600 * 1000).toISOString().slice(0, 19);
+    } else if (finalStatus === "returned") {
+      currentState = rng() < 0.5 ? "RETURN_IN_TRIP" : "RETURN_AT_WAREHOUSE";
+      const pickLeadH = 2 + rng() * 4;
+      pickedTs = new Date(createdMs + pickLeadH * 3600 * 1000).toISOString().slice(0, 19);
+    } else if (finalStatus === "in_progress") {
+      // Stuck ở 1 state trung gian
+      const states: OrderState[] = [
+        "RECEIVED_AT_SORTING",
+        "TRANSPORTING",
+        "ARRIVE_AT_LASTMILE",
+        "START_DELIVERY_TRIP",
+        "WAITING_TO_RETURN",
+      ];
+      currentState = pickOne(rng, states);
+      if (rng() < 0.7) {
+        const pickLeadH = 2 + rng() * 4;
+        pickedTs = new Date(createdMs + pickLeadH * 3600 * 1000).toISOString().slice(0, 19);
+      }
+    } else {
+      // lost / exception
+      currentState = rng() < 0.5 ? "exception" : "lost";
+      const pickLeadH = 2 + rng() * 4;
+      pickedTs = new Date(createdMs + pickLeadH * 3600 * 1000).toISOString().slice(0, 19);
+    }
+
+    out.push({
+      orderId: `GHN${(700_000_000 + i).toString()}`,
+      channel,
+      bcLayCode: bcLay.code,
+      bcGiaoCode: bcGiao.code,
+      ktcCode,
+      regionCode: receiverProvince.regionCode,
+      provinceCode: receiverProvinceCode,
+      phuongIsNew,
+      loaiHang,
+      slaDays,
+      loaiTuyen,
+      createdTs,
+      pickedTs,
+      deliveredTs,
+      promisedTs,
+      currentState,
+      finalStatus,
+      weightKg: Math.round(weightKg * 100) / 100,
+      cod,
+      isChangedWarehouse,
+      shopId: shop.id,
+      shopSizeBucket: shop.sizeBucket,
+    });
+  }
+  return out;
+})();
+
+// -----------------------------------------------------------------------
+// Phase 1 — FACT_TRIP (~12.000 chuyến / 30 ngày)
+// -----------------------------------------------------------------------
+
+const FACT_TRIPS: FactTrip[] = (() => {
+  const rng = seedrandom(MASTER_SEED + ":fact-trip");
+  const out: FactTrip[] = [];
+  const recentDays = DAYS.slice(-FACT_ORDER_DAYS);
+
+  // Phân bổ ~400 chuyến/ngày theo type
+  const tripTypeMix: { type: TripType; perDay: number }[] = [
+    { type: "fm", perDay: 150 },
+    { type: "lh", perDay: 50 },
+    { type: "lm", perDay: 180 },
+    { type: "rt", perDay: 20 },
+  ];
+
+  for (const day of recentDays) {
+    for (const tm of tripTypeMix) {
+      const count = Math.round(tm.perDay * day.multiplier);
+      for (let i = 0; i < count; i++) {
+        const tripId = `T${day.date.replace(/-/g, "")}-${tm.type.toUpperCase()}-${String(i + 1).padStart(4, "0")}`;
+        // Origin + dest theo type
+        let originCode: string, destCode: string, ktcCode: string | undefined;
+        if (tm.type === "fm") {
+          // BC → KTC
+          const bc = BCS[Math.floor(rng() * BCS.length)];
+          originCode = bc.code;
+          destCode = bc.ktcCode;
+          ktcCode = bc.ktcCode;
+        } else if (tm.type === "lh") {
+          // KTC ↔ KTC
+          const k1 = pickOne(rng, KTCS);
+          let k2 = pickOne(rng, KTCS);
+          if (k1.code === k2.code) k2 = KTCS[(KTCS.indexOf(k1) + 1) % KTCS.length];
+          originCode = k1.code;
+          destCode = k2.code;
+        } else if (tm.type === "lm") {
+          // KTC → BC giao
+          const bc = BCS[Math.floor(rng() * BCS.length)];
+          originCode = bc.ktcCode;
+          destCode = bc.code;
+          ktcCode = bc.ktcCode;
+        } else {
+          // rt: BC → KTC (đảo chiều LM)
+          const bc = BCS[Math.floor(rng() * BCS.length)];
+          originCode = bc.code;
+          destCode = bc.ktcCode;
+          ktcCode = bc.ktcCode;
+        }
+
+        // Plan vs actual: 90% on-time, 10% trễ 15-90 phút
+        const dateMs = new Date(day.date + "T08:00:00").getTime();
+        const departHour = Math.floor(rng() * 16); // 0-16h
+        const planDepartMs = dateMs + departHour * 3600 * 1000;
+        const isOnTime = rng() < 0.93;
+        const lateMs = isOnTime ? 0 : (15 + rng() * 75) * 60 * 1000;
+        const actualDepartMs = planDepartMs + lateMs;
+        // Trip duration: 1-12h tuỳ type
+        const durH = tm.type === "lh" ? 4 + rng() * 8 : 1 + rng() * 5;
+        const planArriveMs = planDepartMs + durH * 3600 * 1000;
+        const actualArriveMs = actualDepartMs + durH * 3600 * 1000 + (rng() < 0.05 ? rng() * 3600 * 1000 : 0);
+
+        // Fill rate: 40-95%, kg 55% TB, đơn 57% TB
+        const fillRateKg = clamp01(0.4 + rng() * 0.55);
+        const fillRateOrder = clamp01(fillRateKg + (rng() - 0.5) * 0.1);
+
+        // Km + empty
+        const totalKm = tm.type === "fm" || tm.type === "lm" ? 5 + rng() * 50 : 200 + rng() * 1500;
+        const emptyKm = totalKm * (0.15 + rng() * 0.2); // 15-35%
+
+        // Cost
+        const cost = Math.round(totalKm * (8_000 + rng() * 7_000));
+
+        // Parcels + weight
+        const parcels = Math.round(fillRateOrder * (tm.type === "lh" ? 800 : 200));
+        const weight = Math.round(fillRateKg * (tm.type === "lh" ? 3000 : 500));
+
+        out.push({
+          tripId,
+          type: tm.type,
+          originCode,
+          destCode,
+          ktcCode,
+          planDepart: new Date(planDepartMs).toISOString().slice(0, 19),
+          actualDepart: new Date(actualDepartMs).toISOString().slice(0, 19),
+          planArrive: new Date(planArriveMs).toISOString().slice(0, 19),
+          actualArrive: new Date(actualArriveMs).toISOString().slice(0, 19),
+          fillRateKg: Math.round(fillRateKg * 1000) / 1000,
+          fillRateOrder: Math.round(fillRateOrder * 1000) / 1000,
+          emptyKm: Math.round(emptyKm),
+          totalKm: Math.round(totalKm),
+          cost,
+          parcels,
+          weight,
+          vehicleType: weightedPick(rng, [
+            { value: "truck" as const, weight: 60 },
+            { value: "container" as const, weight: 25 },
+            { value: "van" as const, weight: 15 },
+          ]),
+          carrier: weightedPick(rng, [
+            { value: "internal" as const, weight: 40 },
+            { value: "tpl-a" as const, weight: 25 },
+            { value: "tpl-b" as const, weight: 20 },
+            { value: "tpl-c" as const, weight: 15 },
+          ]),
+        });
+      }
+    }
+  }
+  return out;
+})();
+
+// -----------------------------------------------------------------------
+// Phase 1 — FACT_PICKUP + FACT_DELIVERY (derived từ FACT_ORDERS)
+// -----------------------------------------------------------------------
+
+const FACT_PICKUPS: FactPickup[] = (() => {
+  const rng = seedrandom(MASTER_SEED + ":fact-pickup");
+  const out: FactPickup[] = [];
+  for (const o of FACT_ORDERS) {
+    if (!o.pickedTs) continue; // chỉ sinh cho đơn đã pickup
+    const sizeFactor = o.shopSizeBucket === "small" ? 0.7 : o.shopSizeBucket === "medium" ? 0.88 : 0.95;
+    const assigned = rng() < sizeFactor;
+    const selfAssigned = !assigned && rng() < 0.5;
+    const cutoffOk = rng() < 0.92;
+    const leadtimeAssignSec = Math.round(1800 + rng() * 5400); // 30-120 phút
+    const leadtimeLtcSec = leadtimeAssignSec + Math.round(7200 + rng() * 7200); // +2-4h
+    out.push({
+      orderId: o.orderId,
+      nvpttt: `NV${(1000 + Math.floor(rng() * 9000)).toString()}`,
+      bcCode: o.bcLayCode,
+      assigned,
+      selfAssigned,
+      ltc: cutoffOk && assigned,
+      cutoffOk,
+      leadtimeAssignSec,
+      leadtimeLtcSec,
+    });
+  }
+  return out;
+})();
+
+const FACT_DELIVERIES: FactDelivery[] = (() => {
+  const rng = seedrandom(MASTER_SEED + ":fact-delivery");
+  const out: FactDelivery[] = [];
+  for (const o of FACT_ORDERS) {
+    // Chỉ sinh cho đơn đến giai đoạn delivery
+    if (o.finalStatus === "in_progress" && !o.pickedTs) continue;
+
+    // Attempt distribution: 80% lần 1, 15% lần 2, 5% lần 3+
+    let attempts: number;
+    const ar = rng();
+    if (o.finalStatus === "delivered") {
+      attempts = ar < 0.8 ? 1 : ar < 0.95 ? 2 : 3;
+    } else if (o.finalStatus === "returned") {
+      attempts = 3; // returned thường thử đủ 3 lần
+    } else {
+      attempts = 1 + Math.floor(rng() * 2);
+    }
+
+    const baseMs = o.pickedTs
+      ? new Date(o.pickedTs).getTime() + 12 * 3600 * 1000
+      : new Date(o.createdTs).getTime() + 24 * 3600 * 1000;
+    const failReasons = [
+      "Khách không nghe máy",
+      "Sai địa chỉ",
+      "Khách hẹn lại",
+      "Khách từ chối nhận",
+      "Không liên hệ được khách",
+    ];
+
+    for (let a = 1; a <= attempts; a++) {
+      const attemptMs = baseMs + (a - 1) * 24 * 3600 * 1000;
+      let outcome: "gtc" | "gtb" | "gt1p";
+      if (a === attempts && o.finalStatus === "delivered") {
+        outcome = rng() < 0.97 ? "gtc" : "gt1p";
+      } else if (a < attempts) {
+        outcome = "gtb";
+      } else {
+        outcome = "gtb";
+      }
+      out.push({
+        orderId: o.orderId,
+        nvbc: `NV${(2000 + Math.floor(rng() * 9000)).toString()}`,
+        bcGiaoCode: o.bcGiaoCode,
+        attemptNo: a,
+        outcome,
+        failReason: outcome === "gtb" ? pickOne(rng, failReasons) : undefined,
+        attemptTs: new Date(attemptMs).toISOString().slice(0, 19),
+      });
+    }
+  }
+  return out;
+})();
+
+// -----------------------------------------------------------------------
+// Phase 1 — Public API exposing dimensions + fact tables
+// -----------------------------------------------------------------------
+
+export function getBcs(): Bc[] {
+  return BCS;
+}
+
+export function getBcsByProvince(provinceCode: string): Bc[] {
+  return BCS.filter((b) => b.provinceCode === provinceCode);
+}
+
+export function getChannels(): ChannelCode[] {
+  return CHANNELS;
+}
+
+export function getLoaiBcs(): LoaiBcCode[] {
+  return LOAI_BC_LIST;
+}
+
+export function getCaList(): CaCode[] {
+  return CA_LIST;
+}
+
+export function getFactOrders(): FactOrder[] {
+  return FACT_ORDERS;
+}
+
+export function getFactTrips(): FactTrip[] {
+  return FACT_TRIPS;
+}
+
+export function getFactPickups(): FactPickup[] {
+  return FACT_PICKUPS;
+}
+
+export function getFactDeliveries(): FactDelivery[] {
+  return FACT_DELIVERIES;
+}
+
+/** Stats nhanh để verify mock data — gọi từ dev tool / page debug. */
+export function getFactStats() {
+  const total = FACT_ORDERS.length;
+  const byFinal = FACT_ORDERS.reduce(
+    (a, o) => {
+      a[o.finalStatus] = (a[o.finalStatus] ?? 0) + 1;
+      return a;
+    },
+    {} as Record<FinalStatus, number>,
+  );
+  const changedWh = FACT_ORDERS.filter((o) => o.isChangedWarehouse).length;
+  const newAddr = FACT_ORDERS.filter((o) => o.phuongIsNew);
+  const newAddrChangedWh = newAddr.filter((o) => o.isChangedWarehouse).length;
+  return {
+    totalOrders: total,
+    totalBcs: BCS.length,
+    totalTrips: FACT_TRIPS.length,
+    totalPickups: FACT_PICKUPS.length,
+    totalDeliveries: FACT_DELIVERIES.length,
+    finalStatusMix: {
+      delivered: round1((byFinal.delivered / total) * 100),
+      returned: round1((byFinal.returned / total) * 100),
+      in_progress: round1((byFinal.in_progress / total) * 100),
+      lost: round1((byFinal.lost / total) * 100),
+    },
+    changeWarehouseRate: {
+      overall: round1((changedWh / total) * 100),
+      newAddress:
+        newAddr.length > 0
+          ? round1((newAddrChangedWh / newAddr.length) * 100)
+          : 0,
+      newAddressHnHcm: (() => {
+        const ha = newAddr.filter((o) => o.provinceCode === "HNI" || o.provinceCode === "HCM");
+        const ch = ha.filter((o) => o.isChangedWarehouse).length;
+        return ha.length > 0 ? round1((ch / ha.length) * 100) : 0;
+      })(),
+    },
+  };
 }

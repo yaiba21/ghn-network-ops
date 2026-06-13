@@ -61,6 +61,225 @@ export type Lane = {
 export type VehicleType = "truck" | "container" | "van";
 export type Carrier = "internal" | "tpl-a" | "tpl-b" | "tpl-c";
 
+// =========================================================================
+// Phase 1 — Dimensions mở rộng (theo spec GHN)
+// =========================================================================
+
+/** Bưu cục — node cuối cùng tiếp xúc khách (gửi + giao). ~1.200 BC toàn mạng. */
+export type Bc = {
+  code: string;          // VD: "BC-HCM-001"
+  name: string;          // VD: "BC Nguyễn Văn Trỗi"
+  provinceCode: string;
+  regionCode: RegionCode;
+  ktcCode: string;       // KTC mà BC này thuộc về (n:m thực tế, ở đây simplify 1 BC → 1 KTC chính)
+  loaiBc: LoaiBcCode;    // 8 loại theo spec
+};
+
+/** 8 loại bưu cục theo phân loại nghiệp vụ. */
+export type LoaiBcCode =
+  | "hon-hop"       // GLT — Hỗn hợp (giao + lấy + trả)
+  | "chuyen-giao"   // Chỉ giao
+  | "chuyen-lay"    // Chỉ lấy
+  | "b2b"           // B2B chuyên dụng
+  | "gxt"           // Giao xuyên tỉnh
+  | "hang-vua"      // Hàng vừa
+  | "khl"           // Khu hạ lưu
+  | "ahamove";      // Đối tác Ahamove
+
+export const LOAI_BC_LABEL_VI: Record<LoaiBcCode, string> = {
+  "hon-hop": "Hỗn hợp (GLT)",
+  "chuyen-giao": "Chuyên giao",
+  "chuyen-lay": "Chuyên lấy",
+  b2b: "B2B",
+  gxt: "GXT (giao xuyên tỉnh)",
+  "hang-vua": "Hàng vừa",
+  khl: "KHL",
+  ahamove: "Ahamove",
+};
+
+/** Channel = nguồn đơn. */
+export type ChannelCode = "tts" | "spe" | "sme" | "ka" | "b2b" | "cb";
+
+export const CHANNEL_LABEL_VI: Record<ChannelCode, string> = {
+  tts: "TTS (TikTok Shop)",
+  spe: "SPE (Shopee)",
+  sme: "SME",
+  ka: "KA (Key Account)",
+  b2b: "B2B",
+  cb: "Cross-border",
+};
+
+/** Ca làm việc — 3 ca theo cutoff time. */
+export type CaCode = "ca1" | "ca2" | "ca3";
+
+export const CA_LABEL_VI: Record<CaCode, string> = {
+  ca1: "Ca 1 (→9h)",
+  ca2: "Ca 2 (9h–15h)",
+  ca3: "Ca 3 (15h→)",
+};
+
+export type LoaiHang = "standard" | "bulky";
+
+export const LOAI_HANG_LABEL_VI: Record<LoaiHang, string> = {
+  standard: "Hàng tiêu chuẩn",
+  bulky: "Hàng cồng kềnh",
+};
+
+export type LoaiTuyen = "noi-vung" | "lien-vung";
+
+export const LOAI_TUYEN_LABEL_VI: Record<LoaiTuyen, string> = {
+  "noi-vung": "Nội vùng",
+  "lien-vung": "Liên vùng",
+};
+
+export type SlaDays = 1 | 2 | 3;
+
+/** Trạng thái cuối cùng của đơn (final_status). */
+export type FinalStatus = "delivered" | "returned" | "lost" | "in_progress";
+
+export const FINAL_STATUS_LABEL_VI: Record<FinalStatus, string> = {
+  delivered: "Giao thành công",
+  returned: "Hoàn người gửi",
+  lost: "Thất lạc / hư hỏng",
+  in_progress: "Đang xử lý",
+};
+
+/** Order state machine — 15+ trạng thái theo spec §2. */
+export type OrderState =
+  | "ready_to_pick"
+  | "CANCEL"
+  | "START_PICKING_TRIP"
+  | "PICKED_IN_TRIP"
+  | "PICK_FAILED"
+  | "PICKED_AT_WAREHOUSE"
+  | "SCAN_TO_SORTING"
+  | "PACKED_TO_SORTING"
+  | "PACKED_DIRECT"
+  | "TRANSFER_TO_TRUCK"
+  | "TRANSPORTING"
+  | "ARRIVE_AT_SORTING"
+  | "RECEIVED_AT_SORTING"
+  | "UNPACKED_AT_SORTING"
+  | "PACKED_CROSS_REGION"
+  | "PACKED_TO_LASTMILE"
+  | "ARRIVE_AT_LASTMILE"
+  | "RECEIVED_AT_LASTMILE"
+  | "UNPACKED_AT_LASTMILE"
+  | "DELIVER_AT_WAREHOUSE"
+  | "ADD_DELIVERY_TRIP"
+  | "START_DELIVERY_TRIP"
+  | "COLLECT_DELIVERING_MONEY"
+  | "DELIVER_IN_TRIP"
+  | "DELIVERY_FAILED"
+  | "DELIVERY_FAILED_WITH_COLLECTED"
+  | "SCAN_TO_STORING"
+  | "WAITING_TO_RETURN"
+  | "FORCE_RETURN"
+  | "RETURN"
+  | "ADD_RETURN_TRIP"
+  | "START_RETURN_TRIP"
+  | "RETURN_IN_TRIP"
+  | "RETURN_FAILED"
+  | "RETURN_AT_WAREHOUSE"
+  | "exception"
+  | "lost"
+  | "damage";
+
+/** 6 trạng thái kết thúc (4 ✅ + 2 ❌). */
+export const TERMINAL_STATES: OrderState[] = [
+  "DELIVER_IN_TRIP",        // ✅ GTC
+  "DELIVER_AT_WAREHOUSE",   // ✅
+  "RETURN_IN_TRIP",         // ✅ Trả thành công
+  "RETURN_AT_WAREHOUSE",    // ✅
+  "CANCEL",                 // ❌
+  "exception",              // ❌
+];
+
+// =========================================================================
+// Phase 1 — Fact tables (spec §3)
+// =========================================================================
+
+/** fact_order — 1 dòng / 1 đơn. ~30.000 đơn cho 30 ngày gần nhất. */
+export type FactOrder = {
+  orderId: string;
+  channel: ChannelCode;
+  bcLayCode: string;
+  bcGiaoCode: string;
+  ktcCode: string;
+  regionCode: RegionCode;
+  provinceCode: string;
+  phuongIsNew: boolean;          // is_new_to_address
+  loaiHang: LoaiHang;
+  slaDays: SlaDays;
+  loaiTuyen: LoaiTuyen;
+  createdTs: string;             // ISO
+  pickedTs?: string;
+  deliveredTs?: string;
+  promisedTs: string;
+  currentState: OrderState;
+  finalStatus: FinalStatus;
+  weightKg: number;
+  cod: number;                   // VND, 0 nếu không thu hộ
+  isChangedWarehouse: boolean;
+  shopId: string;                // dùng cho cohort theo shop size
+  shopSizeBucket: "small" | "medium" | "large"; // <50 / 50-2000 / >2000 đơn/tháng
+};
+
+/** fact_trip — 1 dòng / 1 chuyến xe. ~40.000 / tháng. */
+export type TripType = "fm" | "lh" | "lm" | "rt"; // First-mile / Linehaul / Last-mile / Return
+
+export type FactTrip = {
+  tripId: string;
+  type: TripType;
+  originCode: string;            // BC hoặc KTC code
+  destCode: string;
+  ktcCode?: string;              // KTC trung gian (nếu có)
+  planDepart: string;
+  actualDepart: string;
+  planArrive: string;
+  actualArrive: string;
+  fillRateKg: number;            // 0..1
+  fillRateOrder: number;         // 0..1
+  emptyKm: number;
+  totalKm: number;
+  cost: number;                  // VND
+  parcels: number;
+  weight: number;                // kg
+  vehicleType: VehicleType;
+  carrier: Carrier;
+};
+
+/** fact_pickup — chi tiết pickup từng đơn. */
+export type FactPickup = {
+  orderId: string;
+  nvpttt: string;                // mã NV pickup
+  bcCode: string;
+  assigned: boolean;
+  selfAssigned: boolean;
+  ltc: boolean;                  // đúng cutoff?
+  cutoffOk: boolean;
+  leadtimeAssignSec: number;     // giây từ created → assigned
+  leadtimeLtcSec: number;        // giây từ created → picked
+};
+
+/** fact_delivery — chi tiết giao từng đơn (1 đơn có thể nhiều attempt). */
+export type DeliveryOutcome = "gtc" | "gtb" | "gt1p";
+
+export type FactDelivery = {
+  orderId: string;
+  nvbc: string;
+  bcGiaoCode: string;
+  attemptNo: number;             // 1, 2, 3...
+  outcome: DeliveryOutcome;
+  failReason?: string;
+  attemptTs: string;
+};
+
+// =========================================================================
+// Phase 1 — Mở rộng FilterState
+// =========================================================================
+
+
 // --- Filter state --------------------------------------------------------
 
 export type TimePreset = "today" | "week" | "month" | "custom";
@@ -80,6 +299,14 @@ export type FilterState = {
   laneCode?: string;
   vehicleType?: VehicleType | "all";
   carrier?: Carrier | "all";
+  // Phase 1 — dimensions mới
+  bcCode?: string;
+  channelCode?: ChannelCode | "all";
+  loaiBc?: LoaiBcCode | "all";
+  caCode?: CaCode | "all";
+  loaiHang?: LoaiHang | "all";
+  slaDays?: SlaDays | "all";
+  loaiTuyen?: LoaiTuyen | "all";
 };
 
 // --- KPI shape -----------------------------------------------------------

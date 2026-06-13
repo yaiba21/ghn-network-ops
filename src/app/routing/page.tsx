@@ -14,7 +14,7 @@ import {
 import { PageHeader } from "@/components/ui/PageHeader";
 import { FilterBar } from "@/components/filter/FilterBar";
 import { Card } from "@/components/ui/Card";
-import { KpiCard, KpiCardFrom } from "@/components/ui/KpiCard";
+import { KpiCardFrom } from "@/components/ui/KpiCard";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import { OdMatrixCard } from "@/components/routing/OdMatrixCard";
 import { RoutingDecisionQualityCard } from "@/components/routing/RoutingDecisionQualityCard";
@@ -27,8 +27,35 @@ import {
 } from "@/lib/utils";
 import {
   SERVICE_LABEL_VI,
+  type KpiValue,
   type MisRouteRow,
+  type ProvinceCoverageRow,
+  type Status,
 } from "@/lib/types";
+
+function latencyHeadlineKpi(p50: KpiValue): KpiValue {
+  return { ...p50, label: "ORS latency (P50/P99)" };
+}
+
+function buildCoverageKpi(coverage: ProvinceCoverageRow[]): KpiValue {
+  const total = coverage.reduce((a, b) => a + b.totalOrders, 0);
+  const weighted =
+    total === 0
+      ? 0
+      : coverage.reduce((a, b) => a + b.coveredPct * b.totalOrders, 0) / total;
+  const status: Status =
+    weighted >= 97 ? "green" : weighted >= 93 ? "amber" : "red";
+  return {
+    label: "Coverage %",
+    value: weighted,
+    unit: "%",
+    target: 98,
+    deltaPct: 0.4,
+    sparkline: [95, 95.2, 95.5, 95.8, 95.9, 96, 96.1, 96.2, 96.3, 96.4, 96.4, 96.5, 96.5, 96.6],
+    status,
+    direction: "higher-better",
+  };
+}
 
 export default function RoutingPage() {
   const { filter } = useFilter();
@@ -41,26 +68,7 @@ export default function RoutingPage() {
   const updated = dataUpdatedAt();
 
   // Coverage KPI = weighted avg of province coverage by order volume.
-  const coverageKpi = useMemo(() => {
-    const total = coverage.reduce((a, b) => a + b.totalOrders, 0);
-    const weighted =
-      total === 0
-        ? 0
-        : coverage.reduce((a, b) => a + b.coveredPct * b.totalOrders, 0) /
-          total;
-    const status =
-      weighted >= 97 ? "green" : weighted >= 93 ? "amber" : "red";
-    return {
-      label: "Coverage %",
-      value: weighted,
-      unit: "%" as const,
-      target: 98,
-      deltaPct: 0.4,
-      sparkline: [95, 95.2, 95.5, 95.8, 95.9, 96.0, 96.1, 96.2, 96.3, 96.4, 96.4, 96.5, 96.5, 96.6],
-      status,
-      direction: "higher-better" as const,
-    };
-  }, [coverage]);
+  const coverageKpi: KpiValue = buildCoverageKpi(coverage);
 
   const misRouteColumns: Column<MisRouteRow>[] = [
     {
@@ -144,19 +152,12 @@ export default function RoutingPage() {
         <KpiCardFrom kpi={k.misRouteRate} size="sm" />
         <KpiCardFrom kpi={k.reRouteRate} size="sm" />
         <KpiCardFrom kpi={k.fallbackRate} size="sm" />
-        <KpiCard
-          label="ORS latency (P50/P99)"
-          value={k.latencyP50.value}
-          unit="ms"
-          deltaPct={k.latencyP50.deltaPct}
-          status={k.latencyP50.status}
-          direction={k.latencyP50.direction}
-          target={k.latencyP50.target}
-          sparkline={k.latencyP50.sparkline}
+        <KpiCardFrom
+          kpi={latencyHeadlineKpi(k.latencyP50)}
           hint={`P99 ${formatInt(k.latencyP99.value)}ms`}
           size="sm"
         />
-        <KpiCard {...coverageKpi} size="sm" />
+        <KpiCardFrom kpi={coverageKpi} size="sm" />
       </section>
 
       {/* §1 OD Matrix */}

@@ -492,6 +492,328 @@ export const KPI: Record<string, KpiSpec> = {
     target: 3.5,
     thresholds: [3.5, 7],
   },
+
+  // ====================================================================
+  // PHASE 1 — KPI mới theo spec GHN
+  // Range giá trị + công thức trong comment, dùng để verify mock data.
+  // ====================================================================
+
+  // ─── A. Tổng thể mạng (North Star) ────────────────────────────────
+  ontimeNetwork: {
+    // Công thức: đơn ontime theo SLA / tổng đơn. Range 67-91%.
+    key: "ontimeNetwork",
+    label: "Ontime Network",
+    unit: "%",
+    direction: "higher-better",
+    baseline: 87.7,
+    target: 90,
+    thresholds: [90, 88],
+  },
+  costPerKgNetwork: {
+    // Công thức: Total cost / Total weight convert. Range 1350-2150 đ/kg.
+    key: "costPerKgNetwork",
+    label: "Cost / kg",
+    unit: "VND",
+    direction: "lower-better",
+    baseline: 2117,
+    target: 1853,
+    thresholds: [1970, 2057],
+  },
+  hangVeBc4Ca: {
+    // Công thức: đơn nhập BC giao trước 9H D-1 / tổng. Range 64-90%.
+    key: "hangVeBc4Ca",
+    label: "% Hàng về BC ≥4 ca",
+    unit: "%",
+    direction: "higher-better",
+    baseline: 84.52,
+    target: 90,
+    thresholds: [90, 85],
+  },
+  nddAchieve: {
+    // Công thức: đơn On-time NDD / tổng đơn NDD.
+    key: "nddAchieve",
+    label: "NDD Achieve Rate",
+    unit: "%",
+    direction: "higher-better",
+    baseline: 85,
+    target: 87.7,
+    thresholds: [87.7, 85],
+  },
+  pctTC: {
+    // Công thức: GTC / tổng lượt giao. Range 88-96%.
+    key: "pctTC",
+    label: "%TC (Giao thành công)",
+    unit: "%",
+    direction: "higher-better",
+    baseline: 91,
+    target: 92,
+    thresholds: [92, 88],
+  },
+  doiKhoOverall: {
+    // Công thức: (new_wh != old_wh) / tổng đơn nhập BC giao. ~2.25%.
+    key: "doiKhoOverall",
+    label: "Tỷ lệ đổi kho overall",
+    unit: "%",
+    direction: "lower-better",
+    baseline: 2.25,
+    target: 1.5,
+    thresholds: [1.5, 2.3],
+  },
+
+  // ─── B. First-mile / Pickup ────────────────────────────────────────
+  pctDaGan: {
+    // Công thức: đơn đã gán / tổng cần lấy. Range 72-91%.
+    key: "pctDaGan",
+    label: "% Đã gán / cần lấy",
+    unit: "%",
+    direction: "higher-better",
+    baseline: 82,
+    target: 90,
+    thresholds: [90, 80],
+  },
+  pctKhongGan: {
+    // Công thức: đơn shop không gán trong ngày / tổng. Range 4-25%.
+    // Shop nhỏ ~25%, shop lớn ~5%.
+    key: "pctKhongGan",
+    label: "% Không gán",
+    unit: "%",
+    direction: "lower-better",
+    baseline: 12,
+    target: 10,
+    thresholds: [10, 18],
+  },
+  pctLTC: {
+    // Công thức: LTC (đúng cutoff) / tổng cần lấy. Range 85-95%.
+    key: "pctLTC",
+    label: "% LTC (đúng cutoff)",
+    unit: "%",
+    direction: "higher-better",
+    baseline: 89,
+    target: 92,
+    thresholds: [92, 86],
+  },
+  ontimeLayHang: {
+    // Đơn lấy đúng cutoff / tổng. Cũ 49% → mới 85%+.
+    key: "ontimeLayHang",
+    label: "Ontime lấy hàng (cutoff)",
+    unit: "%",
+    direction: "higher-better",
+    baseline: 80,
+    target: 85,
+    thresholds: [85, 75],
+  },
+  leadtimeGanMin: {
+    // Leadtime gán pickup ~1h30.
+    key: "leadtimeGanMin",
+    label: "Leadtime gán pickup",
+    unit: "phút",
+    direction: "lower-better",
+    baseline: 90,
+    target: 75,
+    thresholds: [75, 120],
+  },
+  leadtimeLtcMin: {
+    // Leadtime LTC ~4h.
+    key: "leadtimeLtcMin",
+    label: "Leadtime LTC",
+    unit: "phút",
+    direction: "lower-better",
+    baseline: 240,
+    target: 210,
+    thresholds: [210, 270],
+  },
+  doiKhoMoi: {
+    // Đổi kho theo địa chỉ MỚI / đơn địa chỉ mới. ~8.7% (HN 17%, HCM 14%).
+    key: "doiKhoMoi",
+    label: "% Đổi kho địa chỉ mới",
+    unit: "%",
+    direction: "lower-better",
+    baseline: 8.7,
+    target: 6,
+    thresholds: [6, 10],
+  },
+  doiKhoCu: {
+    // Đổi kho theo địa chỉ CŨ / đơn địa chỉ cũ. ~3%.
+    key: "doiKhoCu",
+    label: "% Đổi kho địa chỉ cũ",
+    unit: "%",
+    direction: "lower-better",
+    baseline: 3,
+    target: 2,
+    thresholds: [2, 4],
+  },
+
+  // ─── C. Middle-mile / Linehaul + KTC ──────────────────────────────
+  time1Min: {
+    // Time1 = scan_đơn_đầu − checkin. P50 15' / P90 25' / P99 40'.
+    key: "time1Min",
+    label: "Time 1 (scan đơn đầu)",
+    unit: "phút",
+    direction: "lower-better",
+    baseline: 18,
+    target: 15,
+    thresholds: [15, 25],
+  },
+  time2Min: {
+    // Time2 = kết_thúc_phiên − scan_đơn_đầu. P50 20' / P90 30' / P99 45'.
+    key: "time2Min",
+    label: "Time 2 (kết thúc phiên)",
+    unit: "phút",
+    direction: "lower-better",
+    baseline: 22,
+    target: 20,
+    thresholds: [20, 32],
+  },
+  leadTimeE2eP50: {
+    // Lead time E2E P50 ~36h.
+    key: "leadTimeE2eP50",
+    label: "Lead time E2E P50",
+    unit: "h",
+    direction: "lower-better",
+    baseline: 36,
+    target: 32,
+    thresholds: [32, 48],
+  },
+  leadTimeE2eP90: {
+    key: "leadTimeE2eP90",
+    label: "Lead time E2E P90",
+    unit: "h",
+    direction: "lower-better",
+    baseline: 60,
+    target: 48,
+    thresholds: [48, 72],
+  },
+  leadTimeE2eP99: {
+    key: "leadTimeE2eP99",
+    label: "Lead time E2E P99",
+    unit: "h",
+    direction: "lower-better",
+    baseline: 90,
+    target: 72,
+    thresholds: [72, 110],
+  },
+  fillRateKg: {
+    // KL đơn rời điểm / KL chuẩn. TB ~55%, range 40-95%.
+    key: "fillRateKg",
+    label: "Fill rate (kg)",
+    unit: "%",
+    direction: "higher-better",
+    baseline: 55,
+    target: 75,
+    thresholds: [75, 60],
+  },
+  fillRateOrder: {
+    // Orders rời / standard. TB ~57%.
+    key: "fillRateOrder",
+    label: "Fill rate (đơn)",
+    unit: "%",
+    direction: "higher-better",
+    baseline: 57,
+    target: 70,
+    thresholds: [70, 55],
+  },
+  ontimeVanTai: {
+    // 1 − (điểm dừng sai ontime / tổng điểm dừng). 91-95%.
+    key: "ontimeVanTai",
+    label: "Ontime vận tải",
+    unit: "%",
+    direction: "higher-better",
+    baseline: 93,
+    target: 95,
+    thresholds: [95, 93],
+  },
+  pctEmptyMileage: {
+    // km rỗng / tổng km. 15-35%.
+    key: "pctEmptyMileage",
+    label: "% Empty Mileage",
+    unit: "%",
+    direction: "lower-better",
+    baseline: 25,
+    target: 20,
+    thresholds: [20, 30],
+  },
+  saiSotDoiSoat: {
+    // Sai sót đối soát NCC. ~4.5% → target <1%.
+    key: "saiSotDoiSoat",
+    label: "Sai sót đối soát NCC",
+    unit: "%",
+    direction: "lower-better",
+    baseline: 4.5,
+    target: 1,
+    thresholds: [1, 4.5],
+  },
+  pctPhanTuyenDung: {
+    // % phân tuyến đúng lần đầu. Range 96-99%.
+    key: "pctPhanTuyenDung",
+    label: "% phân tuyến đúng lần đầu",
+    unit: "%",
+    direction: "higher-better",
+    baseline: 97.5,
+    target: 98.5,
+    thresholds: [98.5, 95],
+  },
+
+  // ─── D. Last-mile / Giao hàng ─────────────────────────────────────
+  opr: {
+    // Order Performance Rate. 90-97%.
+    key: "opr",
+    label: "OPR (Order Performance Rate)",
+    unit: "%",
+    direction: "higher-better",
+    baseline: 94,
+    target: 95,
+    thresholds: [95, 92],
+  },
+  odr: {
+    // On-time Delivery Rate. 90-97%.
+    key: "odr",
+    label: "ODR (On-time Delivery Rate)",
+    unit: "%",
+    direction: "higher-better",
+    baseline: 93.83,
+    target: 95,
+    thresholds: [95, 92],
+  },
+  pctFD: {
+    // FD / tổng đơn hoàn tất. 4-10%.
+    key: "pctFD",
+    label: "%FD (First Delivery success)",
+    unit: "%",
+    direction: "higher-better",
+    baseline: 7,
+    target: 8,
+    thresholds: [8, 5],
+  },
+  aov: {
+    // Average Order Value = tổng cước / tổng đơn. 18-35k đ.
+    key: "aov",
+    label: "AOV (đ/đơn)",
+    unit: "VND",
+    direction: "higher-better",
+    baseline: 25_000,
+    target: 28_000,
+    thresholds: [28_000, 20_000],
+  },
+  pctReturn: {
+    // % đơn hoàn / tổng. ~8% theo final_status mix.
+    key: "pctReturn",
+    label: "% Return rate",
+    unit: "%",
+    direction: "lower-better",
+    baseline: 8,
+    target: 6,
+    thresholds: [6, 10],
+  },
+  pctLost: {
+    // % thất lạc + hư hỏng. ~1%.
+    key: "pctLost",
+    label: "% Thất lạc / hư hỏng",
+    unit: "%",
+    direction: "lower-better",
+    baseline: 1,
+    target: 0.5,
+    thresholds: [0.5, 1.5],
+  },
 };
 
 export function statusFromValue(spec: KpiSpec, value: number): Status {
