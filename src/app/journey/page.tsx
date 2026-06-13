@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { useFilter } from "@/components/filter/FilterContext";
 import {
+  getJourneyAlerts,
   getJourneyFinalStatusMix,
   getJourneyPercentiles,
   getJourneyStatusGroups,
@@ -11,6 +12,7 @@ import {
 import { dataUpdatedAt } from "@/lib/mock-data";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { FilterBar } from "@/components/filter/FilterBar";
+import { AlertBanner } from "@/components/ui/AlertBanner";
 import { Card } from "@/components/ui/Card";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import {
@@ -36,6 +38,7 @@ export default function JourneyPage() {
   const percentiles = useMemo(() => getJourneyPercentiles(filter), [filter]);
   const finalMix = useMemo(() => getJourneyFinalStatusMix(filter), [filter]);
   const topOrders = useMemo(() => getJourneyTopOrders(filter, 30), [filter]);
+  const alerts = useMemo(() => getJourneyAlerts(filter), [filter]);
   const updated = dataUpdatedAt();
 
   const totalOrders = finalMix.reduce((a, b) => a + b.count, 0);
@@ -63,10 +66,20 @@ export default function JourneyPage() {
         }}
       />
 
-      {/* === Stage flow gom funnel + 6 nhóm === */}
+      {alerts.length > 0 && <AlertBanner alerts={alerts} />}
+
+      {/* === Bảng 6 nhóm trạng thái + metrics === */}
       <Card
-        title={`Hành trình đơn — ${formatCompactInt(totalOrders)} đơn qua 6 chặng`}
-        subtitle="Mỗi chặng: số lượng · % pass · LT TB · # fail. Đơn rớt khỏi flow đi xuống ô outcome bên dưới."
+        title={`Bảng trạng thái — ${formatCompactInt(totalOrders)} đơn qua 6 chặng`}
+        subtitle="Mỗi nhóm trạng thái: số lượng · % thành công · lead time TB · số đơn fail."
+      >
+        <StatusGroupTable groups={groups} />
+      </Card>
+
+      {/* === Stage flow visual (bổ trợ) === */}
+      <Card
+        title="Hồ phễu trực quan"
+        subtitle="Cao = số lượng lớn. Đọc trái-phải theo flow đơn. Drop-off đỏ ở chặng nghẽn."
       >
         <StageFlowVisualization groups={groups} totalOrders={totalOrders} />
       </Card>
@@ -91,6 +104,73 @@ export default function JourneyPage() {
       <OrdersDrillTable rows={topOrders} />
     </div>
   );
+}
+
+// =============================================================================
+// Status group table — 6 nhóm trạng thái + metrics
+// =============================================================================
+
+function StatusGroupTable({
+  groups,
+}: {
+  groups: ReturnType<typeof getJourneyStatusGroups>;
+}) {
+  const cols: Column<ReturnType<typeof getJourneyStatusGroups>[number]>[] = [
+    {
+      key: "groupLabel",
+      label: "Nhóm trạng thái",
+      render: (r) => <span className="font-medium">{r.groupLabel}</span>,
+    },
+    {
+      key: "total",
+      label: "Số lượng",
+      align: "right",
+      sortable: true,
+      sortValue: (r) => r.total,
+      render: (r) => formatCompactInt(r.total) + " đơn",
+    },
+    {
+      key: "successRate",
+      label: "% Thành công",
+      align: "right",
+      sortable: true,
+      sortValue: (r) => r.successRate,
+      render: (r) => (
+        <span
+          className={
+            r.successRate >= 92
+              ? "text-emerald-600"
+              : r.successRate >= 85
+                ? "text-amber-600"
+                : "text-red-600"
+          }
+        >
+          {formatPct(r.successRate, 1)}
+        </span>
+      ),
+    },
+    {
+      key: "avgLeadtimeH",
+      label: "Lead time TB",
+      align: "right",
+      sortable: true,
+      sortValue: (r) => r.avgLeadtimeH,
+      render: (r) => (r.avgLeadtimeH > 0 ? formatHours(r.avgLeadtimeH) : "—"),
+    },
+    {
+      key: "failCount",
+      label: "Số đơn fail",
+      align: "right",
+      sortable: true,
+      sortValue: (r) => r.failCount,
+      render: (r) => (
+        <span className={r.failCount === 0 ? "text-[var(--color-text-muted)]" : "text-red-600"}>
+          {formatCompactInt(r.failCount)}
+        </span>
+      ),
+    },
+  ];
+  return <DataTable columns={cols} data={groups} rowKey={(r) => r.groupKey} />;
 }
 
 // =============================================================================

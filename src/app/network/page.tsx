@@ -6,8 +6,11 @@ import { useFilter } from "@/components/filter/FilterContext";
 import {
   bcStateLabel,
   getBcDrillByRegion,
+  getBcSubMetricsByRegion,
   getKtcScorecard,
-  getNetworkSubMetrics,
+  getNetworkAlerts,
+  getNetworkGraph,
+  getNetworkSubMetricsByRegion,
   getOverviewNorthStar,
   getRegionBcStates,
   getRegionScorecard,
@@ -15,11 +18,12 @@ import {
 import { dataUpdatedAt } from "@/lib/mock-data";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { FilterBar } from "@/components/filter/FilterBar";
+import { AlertBanner } from "@/components/ui/AlertBanner";
 import { Card } from "@/components/ui/Card";
 import { KpiCardFrom } from "@/components/ui/KpiCard";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import { StatusBadge } from "@/components/ui/StatusBadge";
-import { Sparkline } from "@/components/ui/Sparkline";
+import { NetworkGraph } from "@/components/ui/NetworkGraph";
 import { REGION_LABEL_VI, type RegionCode } from "@/lib/types";
 import {
   cn,
@@ -37,7 +41,12 @@ export default function NetworkPage() {
   const regionScorecard = useMemo(() => getRegionScorecard(filter), [filter]);
   const bcStates = useMemo(() => getRegionBcStates(filter), [filter]);
   const ktcScorecard = useMemo(() => getKtcScorecard(filter), [filter]);
-  const subMetrics = useMemo(() => getNetworkSubMetrics(filter), [filter]);
+  const subMetricsByRegion = useMemo(
+    () => getNetworkSubMetricsByRegion(filter),
+    [filter],
+  );
+  const graph = useMemo(() => getNetworkGraph(filter), [filter]);
+  const alerts = useMemo(() => getNetworkAlerts(filter), [filter]);
   const updated = dataUpdatedAt();
 
   // Drill-down state: vùng đang chọn để show BC bên dưới
@@ -45,6 +54,13 @@ export default function NetworkPage() {
   const bcDrill = useMemo(
     () => (drillRegion ? getBcDrillByRegion(filter, drillRegion, 50) : []),
     [filter, drillRegion],
+  );
+
+  // Drill cho sub-metrics
+  const [subDrillRegion, setSubDrillRegion] = useState<RegionCode | null>(null);
+  const bcSubDrill = useMemo(
+    () => (subDrillRegion ? getBcSubMetricsByRegion(filter, subDrillRegion, 50) : []),
+    [filter, subDrillRegion],
   );
 
   return (
@@ -68,6 +84,8 @@ export default function NetworkPage() {
           loaiTuyen: true,
         }}
       />
+
+      {alerts.length > 0 && <AlertBanner alerts={alerts} />}
 
       {/* === KPI mạng (bỏ đổi kho) === */}
       <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
@@ -144,59 +162,57 @@ export default function NetworkPage() {
         />
       </Card>
 
-      {/* === Network sub-metrics có công thức + visualize === */}
+      {/* === Network graph KTC + lanes === */}
       <Card
-        title="Network sub-metrics"
-        subtitle="Các chỉ số NDS+KTC chi tiết — công thức ước lượng + xu hướng 7 ngày (mock data)."
+        title="Network graph — KTC + Lanes"
+        subtitle="Node = KTC (size theo throughput), edge = lane KTC↔KTC (màu theo ontime, độ dày theo số trip)."
       >
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-          {subMetrics.map((m) => (
-            <SubMetricCard key={m.key} metric={m} />
-          ))}
-        </div>
+        <NetworkGraph nodes={graph.nodes} edges={graph.edges} />
       </Card>
-    </div>
-  );
-}
 
-function SubMetricCard({
-  metric: m,
-}: {
-  metric: ReturnType<typeof getNetworkSubMetrics>[number];
-}) {
-  const colorCls =
-    m.status === "green"
-      ? "text-emerald-600"
-      : m.status === "amber"
-        ? "text-amber-600"
-        : "text-red-600";
-  return (
-    <div className="border border-[var(--color-border)] rounded-md p-3 bg-white">
-      <div className="text-[11px] text-[var(--color-text)] font-medium leading-tight min-h-[28px]">
-        {m.label}
-      </div>
-      <div className="mt-1 flex items-baseline justify-between">
-        <span className={cn("text-2xl font-semibold tabular-nums", colorCls)}>
-          {m.unit === "%" ? formatPct(m.value, 1) : `${m.value}`}
-        </span>
-        <span className="text-[10px] text-[var(--color-text-muted)]">
-          {m.unit !== "%" ? m.unit : ""}
-        </span>
-      </div>
-      <div className="mt-1">
-        <Sparkline data={m.trend} status={m.status} width={140} height={24} />
-      </div>
-      <div className="mt-2 pt-2 border-t border-[var(--color-border-soft)]">
-        <div className="text-[9px] uppercase tracking-wide text-[var(--color-text-muted)]">
-          Công thức
-        </div>
-        <div className="text-[10px] text-[var(--color-text-muted)] font-mono leading-tight">
-          {m.formula}
-        </div>
-        <div className="text-[10px] text-[var(--color-text-muted)] mt-1 tabular-nums">
-          Mục tiêu {m.unit === "%" ? `${m.target}%` : `${m.target}${m.unit}`}
-        </div>
-      </div>
+      {/* === Network sub-metrics dạng bảng theo vùng (drill BC) === */}
+      <Card
+        title="Network sub-metrics theo vùng"
+        subtitle="So sánh sub-metric NDS+KTC giữa 14 vùng. Bấm vùng để drill xuống sub-metric từng BC."
+        actions={
+          <div className="text-[10px] uppercase tracking-wide text-[var(--color-text-muted)]">
+            Công thức ước lượng — mock data
+          </div>
+        }
+      >
+        <DataTable
+          columns={subMetricRegionColumns}
+          data={subMetricsByRegion}
+          rowKey={(r) => r.regionCode}
+          onRowClick={(r) => setSubDrillRegion(r.regionCode)}
+        />
+      </Card>
+
+      {/* === Drill sub-metrics theo BC === */}
+      {subDrillRegion && (
+        <Card
+          title={`Sub-metrics BC — Vùng ${REGION_LABEL_VI[subDrillRegion]}`}
+          subtitle={`${bcSubDrill.length} BC, sort theo cột để tìm BC kém. Xuất kiện ontime · chờ nhập KTC · sorting · sai lệch KLKT.`}
+          actions={
+            <button
+              type="button"
+              onClick={() => setSubDrillRegion(null)}
+              className="inline-flex items-center gap-1 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+            >
+              <X className="w-3.5 h-3.5" /> Đóng
+            </button>
+          }
+        >
+          <DataTable
+            columns={bcSubMetricColumns}
+            data={bcSubDrill}
+            rowKey={(r) => r.bcCode}
+            searchable
+            searchPlaceholder="Tìm BC..."
+            pageSize={15}
+          />
+        </Card>
+      )}
     </div>
   );
 }
@@ -211,6 +227,65 @@ function pctColor(value: number, green: number, amber: number, higherBetter = tr
   }
   return value <= green ? "text-emerald-600" : value <= amber ? "text-amber-600" : "text-red-600";
 }
+
+const subMetricRegionColumns: Column<
+  ReturnType<typeof getNetworkSubMetricsByRegion>[number]
+>[] = [
+  {
+    key: "regionName",
+    label: "Vùng",
+    render: (r) => (
+      <span className="inline-flex items-center gap-1 font-medium">
+        {r.regionName}
+        <ChevronRight className="w-3 h-3 text-[var(--color-text-faint)]" />
+      </span>
+    ),
+  },
+  { key: "totalBc", label: "Tổng BC", align: "right", sortable: true, sortValue: (r) => r.totalBc, render: (r) => formatInt(r.totalBc) },
+  {
+    key: "xuatKienOntime", label: "% Xuất kiện ontime", align: "right", sortable: true, sortValue: (r) => r.xuatKienOntime,
+    render: (r) => <span className={pctColor(r.xuatKienOntime, 95, 90)}>{formatPct(r.xuatKienOntime, 1)}</span>,
+  },
+  {
+    key: "choNhapKtc", label: "Chờ nhập KTC (phút)", align: "right", sortable: true, sortValue: (r) => r.choNhapKtc,
+    render: (r) => <span className={pctColor(r.choNhapKtc, 30, 45, false)}>{formatInt(r.choNhapKtc)}'</span>,
+  },
+  {
+    key: "tgSorting", label: "TG sorting (phút)", align: "right", sortable: true, sortValue: (r) => r.tgSorting,
+    render: (r) => <span className={pctColor(r.tgSorting, 45, 60, false)}>{formatInt(r.tgSorting)}'</span>,
+  },
+  {
+    key: "saiLechKlkt", label: "% Sai lệch KLKT", align: "right", sortable: true, sortValue: (r) => r.saiLechKlkt,
+    render: (r) => <span className={pctColor(r.saiLechKlkt, 1.5, 3, false)}>{formatPct(r.saiLechKlkt, 1)}</span>,
+  },
+  {
+    key: "soLanQuaKtc", label: "TB lần qua KTC", align: "right", sortable: true, sortValue: (r) => r.soLanQuaKtc,
+    render: (r) => <span className={pctColor(r.soLanQuaKtc, 1.5, 2, false)}>{r.soLanQuaKtc}</span>,
+  },
+  { key: "status", label: "Trạng thái", align: "right", render: (r) => <div className="inline-flex"><StatusBadge status={r.status} /></div> },
+];
+
+const bcSubMetricColumns: Column<ReturnType<typeof getBcSubMetricsByRegion>[number]>[] = [
+  { key: "bcName", label: "Bưu cục", render: (r) => <span className="font-medium truncate">{r.bcName}</span> },
+  { key: "province", label: "Tỉnh", sortable: true },
+  {
+    key: "xuatKienOntime", label: "% Xuất kiện ontime", align: "right", sortable: true, sortValue: (r) => r.xuatKienOntime,
+    render: (r) => <span className={pctColor(r.xuatKienOntime, 95, 90)}>{formatPct(r.xuatKienOntime, 1)}</span>,
+  },
+  {
+    key: "choNhapKtc", label: "Chờ nhập KTC (phút)", align: "right", sortable: true, sortValue: (r) => r.choNhapKtc,
+    render: (r) => <span className={pctColor(r.choNhapKtc, 30, 45, false)}>{formatInt(r.choNhapKtc)}'</span>,
+  },
+  {
+    key: "tgSorting", label: "TG sorting (phút)", align: "right", sortable: true, sortValue: (r) => r.tgSorting,
+    render: (r) => <span className={pctColor(r.tgSorting, 45, 60, false)}>{formatInt(r.tgSorting)}'</span>,
+  },
+  {
+    key: "saiLechKlkt", label: "% Sai lệch KLKT", align: "right", sortable: true, sortValue: (r) => r.saiLechKlkt,
+    render: (r) => <span className={pctColor(r.saiLechKlkt, 1.5, 3, false)}>{formatPct(r.saiLechKlkt, 1)}</span>,
+  },
+  { key: "status", label: "Trạng thái", align: "right", render: (r) => <div className="inline-flex"><StatusBadge status={r.status} /></div> },
+];
 
 const bcStateColumns: Column<ReturnType<typeof getRegionBcStates>[number]>[] = [
   {

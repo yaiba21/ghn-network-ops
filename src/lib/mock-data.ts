@@ -2601,12 +2601,12 @@ const FACT_ORDERS: FactOrder[] = (() => {
     if (phuongIsNew) {
       changeRate =
         senderProvinceCode === "HNI"
-          ? 0.17
+          ? 0.1
           : senderProvinceCode === "HCM"
-            ? 0.14
-            : 0.06;
+            ? 0.085
+            : 0.04;
     } else {
-      changeRate = 0.03;
+      changeRate = 0.015;
     }
     const isChangedWarehouse = rng() < changeRate;
 
@@ -2690,11 +2690,27 @@ const FACT_ORDERS: FactOrder[] = (() => {
     if (finalStatus === "delivered") {
       currentState = "DELIVER_IN_TRIP";
       setPicked();
-      const baseHours = loaiTuyen === "lien-vung" ? 48 : 24;
-      let leadH = baseHours + rng() * 24;
-      if (loaiHang === "cong-kenh" || loaiHang === "nang") leadH *= 1.3;
-      if (isTetPeriod(day.date)) leadH *= 1.5;
-      deliveredTs = new Date(createdMs + leadH * 3600 * 1000).toISOString().slice(0, 19);
+      // Ontime rate phụ thuộc vùng (REGION_PENALTY) → tạo phân bố xanh/vàng/đỏ
+      // thực tế giữa các vùng. Target Ontime Network ~67-91% theo spec.
+      const rp = REGION_PENALTY[receiverProvince.regionCode] ?? 1;
+      let ontimeRate = 0.94 * rp; // ~0.86-0.96, tạo mix xanh/vàng/đỏ theo vùng
+      if (loaiHang === "cong-kenh" || loaiHang === "nang") ontimeRate -= 0.05;
+      if (loaiTuyen === "lien-vung") ontimeRate -= 0.04;
+      if (isTetPeriod(day.date)) ontimeRate -= 0.2;
+      const promisedMs2 = createdMs + slaDays * 24 * 3600 * 1000;
+      if (rng() < ontimeRate) {
+        // Giao TRƯỚC promised — ontime (60-98% quãng SLA)
+        const frac = 0.6 + rng() * 0.38;
+        deliveredTs = new Date(createdMs + (promisedMs2 - createdMs) * frac)
+          .toISOString()
+          .slice(0, 19);
+      } else {
+        // Giao SAU promised — trễ 2-30h
+        const lateH = 2 + rng() * 28;
+        deliveredTs = new Date(promisedMs2 + lateH * 3600 * 1000)
+          .toISOString()
+          .slice(0, 19);
+      }
     } else if (finalStatus === "delivery_failed") {
       currentState = "DELIVERY_FAILED";
       setPicked();
@@ -2827,7 +2843,8 @@ const FACT_TRIPS: FactTrip[] = (() => {
         const emptyKm = totalKm * (0.15 + rng() * 0.2); // 15-35%
 
         // Cost
-        const cost = Math.round(totalKm * (8_000 + rng() * 7_000));
+        // Calibrate để cost/kg blended ~1.850đ (spec 1.350-2.150)
+        const cost = Math.round(totalKm * (4_000 + rng() * 3_500));
 
         // Parcels + weight
         const parcels = Math.round(fillRateOrder * (tm.type === "lh" ? 800 : 200));

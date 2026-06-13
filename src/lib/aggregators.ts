@@ -11,6 +11,7 @@ import {
   getFactOrders,
   getFactPickups,
   getFactTrips,
+  getKtcs,
 } from "./mock-data";
 import { KPI, statusFromValue } from "./kpi-config";
 import type {
@@ -182,13 +183,38 @@ function computeDoiKhoMoi(orders: FactOrder[]): number {
   return round1(pct(newAddr.filter((o) => o.isChangedWarehouse).length, newAddr.length));
 }
 
+// Map orderId → finalStatus (memo 1 lần) để tính %TC per-order nhanh.
+let _orderStatusMap: Map<string, FinalStatus> | null = null;
+function orderStatusMap(): Map<string, FinalStatus> {
+  if (!_orderStatusMap) {
+    _orderStatusMap = new Map(
+      getFactOrders().map((o) => [o.orderId, o.finalStatus]),
+    );
+  }
+  return _orderStatusMap;
+}
+
 function computePctTc(orderIds: Set<string>): number {
-  // %TC = GTC attempts / tổng attempts
-  const deliveries = getFactDeliveries().filter((d) => orderIds.has(d.orderId));
-  if (deliveries.length === 0) return 0;
-  return round1(
-    pct(deliveries.filter((d) => d.outcome === "gtc").length, deliveries.length),
-  );
+  // %TC = đơn GTC / đơn đã đến quyết định giao tại BC giao.
+  // Mẫu số = delivered + delivery_failed + returned_success + returned_failed
+  // (returns = đơn GTB rồi hoàn). Loại exception/lost/cancelled/in_progress.
+  // Range thực tế 88-96%.
+  const sm = orderStatusMap();
+  let gtc = 0;
+  let denom = 0;
+  for (const id of orderIds) {
+    const s = sm.get(id);
+    if (
+      s === "delivered" ||
+      s === "delivery_failed" ||
+      s === "returned_success" ||
+      s === "returned_failed"
+    ) {
+      denom += 1;
+      if (s === "delivered") gtc += 1;
+    }
+  }
+  return denom === 0 ? 0 : round1(pct(gtc, denom));
 }
 
 function computePctTb(orderIds: Set<string>): number {
@@ -594,6 +620,29 @@ export function getOverviewModuleHealth(filter: FilterState): ModuleHealth[] {
 }
 
 // 14 vùng GHN theo spec — sort theo volume share ước lượng
+// Hệ số cost theo vùng (vùng xa cost cao hơn) — vì trips không gắn region,
+// dùng factor này để tạo variance giữa các vùng trong scorecard/heatmap.
+const REGION_COST_FACTOR: Record<RegionCode, number> = {
+  HNO: 0.92,
+  HCM: 0.93,
+  DSH: 0.96,
+  DNB: 0.97,
+  DCL: 1.02,
+  BTB: 1.04,
+  DBB: 1.03,
+  TTB: 1.05,
+  NTB: 1.06,
+  TNG: 1.12,
+  TNB: 1.08,
+  XBG: 1.0,
+  TBB: 1.15,
+  TNT: 1.01,
+};
+
+function regionCostPerKg(region: RegionCode, baseCpk: number): number {
+  return Math.round(baseCpk * (REGION_COST_FACTOR[region] ?? 1));
+}
+
 const HEATMAP_REGIONS: { code: RegionCode; name: string }[] = [
   { code: "HCM", name: "Hồ Chí Minh" },
   { code: "HNO", name: "Hà Nội" },
@@ -629,7 +678,7 @@ export function getOverviewRegionHeatmap(filter: FilterState): HeatmapData {
     const trips = filterTrips(subFilter);
 
     const ontime = computeOntimeNetwork(orders);
-    const cpk = computeCostPerKg(trips);
+    const cpk = regionCostPerKg(r.code, computeCostPerKg(trips));
     const tc = computePctTc(orderIds);
     const dk = computeDoiKhoOverall(orders);
 
@@ -1588,6 +1637,52 @@ export function getDoiKhoCompare(filter: FilterState): DoiKhoCompare {
   };
 }
 
+/**
+ * Đổi kho breakdown: 1 overall + 4 segment (HCM/HN × phường mới/cũ).
+ * Mỗi segment = tỷ lệ đổi kho TRONG segment đó (drill từ overall).
+ */
+export type DoiKhoBreakdown = {
+  key: string;
+  label: string;
+  rate: number;       // % đổi kho trong segment
+  count: number;      // số đơn đổi kho
+  segmentTotal: number; // tổng đơn segment
+  status: Status;
+};
+
+export function getDoiKhoBreakdown(filter: FilterState): DoiKhoBreakdown[] {
+  const orders = filterOrders(filter);
+  const seg = (
+    key: string,
+    label: string,
+    pool: typeof orders,
+    green: number,
+    amber: number,
+  ): DoiKhoBreakdown => {
+    const count = pool.filter((o) => o.isChangedWarehouse).length;
+    const rate = pool.length > 0 ? round1(pct(count, pool.length)) : 0;
+    return {
+      key,
+      label,
+      rate,
+      count,
+      segmentTotal: pool.length,
+      status: rate <= green ? "green" : rate <= amber ? "amber" : "red",
+    };
+  };
+
+  const hcm = orders.filter((o) => o.provinceCode === "HCM");
+  const hn = orders.filter((o) => o.provinceCode === "HNI");
+
+  return [
+    seg("overall", "Overall (toàn bộ)", orders, 1.5, 2.3),
+    seg("hcm-new", "HCM · phường mới", hcm.filter((o) => o.phuongIsNew), 10, 14),
+    seg("hcm-old", "HCM · phường cũ", hcm.filter((o) => !o.phuongIsNew), 2, 4),
+    seg("hn-new", "HN · phường mới", hn.filter((o) => o.phuongIsNew), 10, 17),
+    seg("hn-old", "HN · phường cũ", hn.filter((o) => !o.phuongIsNew), 2, 4),
+  ];
+}
+
 // =============================================================================
 // PHASE 5a — /network scorecard
 // =============================================================================
@@ -1612,7 +1707,7 @@ export function getRegionScorecard(filter: FilterState): RegionScorecardRow[] {
     const orderIds = new Set(orders.map((o) => o.orderId));
     const trips = filterTrips(sub);
     const ontime = computeOntimeNetwork(orders);
-    const cpk = computeCostPerKg(trips);
+    const cpk = regionCostPerKg(r.code, computeCostPerKg(trips));
     const tc = computePctTc(orderIds);
     const h4 = computeHangVeBc4Ca(orders);
     const dk = computeDoiKhoOverall(orders);
@@ -2136,5 +2231,442 @@ export function getNetworkSubMetrics(filter: FilterState): NetworkSubMetric[] {
       status: soLanQuaKtc <= 1.5 ? "green" : soLanQuaKtc <= 2 ? "amber" : "red",
       trend: spark(1.6, 0.3, 5),
     },
+  ];
+}
+
+
+// =============================================================================
+// PHASE 6 — Alerts cho từng page (fact-based)
+// =============================================================================
+
+export function getRoutingAlerts(filter: FilterState): AlertItem[] {
+  const orders = filterOrders(filter);
+  const total = orders.length || 1;
+  const out: AlertItem[] = [];
+
+  const dk = computeDoiKhoOverall(orders);
+  if (dk > KPI.doiKhoOverall.thresholds[1]) {
+    out.push({
+      id: "rt-doikho-high",
+      severity: "warning",
+      title: `Tỷ lệ đổi kho overall ${dk.toFixed(1)}% — vượt ngưỡng ${KPI.doiKhoOverall.thresholds[1]}%`,
+    });
+  }
+
+  const newAddr = orders.filter((o) => o.phuongIsNew);
+  const dkNew =
+    newAddr.length > 0
+      ? round1(pct(newAddr.filter((o) => o.isChangedWarehouse).length, newAddr.length))
+      : 0;
+  if (dkNew > 10) {
+    out.push({
+      id: "rt-doikho-new",
+      severity: "warning",
+      title: `Đổi kho địa chỉ MỚI ${dkNew.toFixed(1)}% — cần ưu tiên xây rule cho phường mới`,
+    });
+  }
+
+  const revert = orders.filter((o) => o.isChangedWarehouse).length;
+  out.push({
+    id: "rt-cost-impact",
+    severity: "info",
+    title: `chi phí phát sinh do đổi kho (~10k đ/đơn) — kỳ này ${formatVNDShort(revert * 10000)}`,
+    count: revert,
+  });
+
+  return out;
+}
+
+export function getNetworkAlerts(filter: FilterState): AlertItem[] {
+  const out: AlertItem[] = [];
+  const bcStates = getRegionBcStates(filter);
+  const totalOverload = bcStates.reduce((a, b) => a + b.overload, 0);
+  const totalSla = bcStates.reduce((a, b) => a + b.slaBreach, 0);
+  const totalCost = bcStates.reduce((a, b) => a + b.costBreach, 0);
+
+  if (totalOverload > 0)
+    out.push({
+      id: "nw-overload",
+      severity: totalOverload > 80 ? "critical" : "warning",
+      title: "BC đang quá tải (đơn chờ sort cao) — cần điều phối nhân lực",
+      count: totalOverload,
+    });
+  if (totalSla > 0)
+    out.push({
+      id: "nw-sla",
+      severity: "warning",
+      title: "BC vượt SLA — TAT cao hơn ngưỡng",
+      count: totalSla,
+    });
+  if (totalCost > 0)
+    out.push({
+      id: "nw-cost",
+      severity: "warning",
+      title: "BC vượt cost target — chi phí/kg cao",
+      count: totalCost,
+    });
+
+  // KTC fill rate thấp
+  const trips = filterTrips(filter);
+  const fillKg = computeFillRateKg(trips);
+  if (fillKg < KPI.fillRateKg.thresholds[1]) {
+    out.push({
+      id: "nw-fill",
+      severity: "warning",
+      title: `Fill rate kg trung bình ${fillKg.toFixed(1)}% — dưới ngưỡng ${KPI.fillRateKg.thresholds[1]}%`,
+    });
+  }
+  return out;
+}
+
+export function getTransportAlerts(filter: FilterState): AlertItem[] {
+  const out: AlertItem[] = [];
+  const trips = filterTrips(filter);
+  const ovt = computeOntimeVanTai(trips);
+  const empty = computeEmptyMileage(trips);
+  const fillKg = computeFillRateKg(trips);
+
+  if (ovt < KPI.ontimeVanTai.thresholds[1])
+    out.push({
+      id: "tp-ontime",
+      severity: "warning",
+      title: `Ontime vận tải ${ovt.toFixed(1)}% — dưới ngưỡng ${KPI.ontimeVanTai.thresholds[1]}%`,
+    });
+  if (empty > KPI.pctEmptyMileage.thresholds[1])
+    out.push({
+      id: "tp-empty",
+      severity: "warning",
+      title: `% Empty mileage ${empty.toFixed(1)}% — vượt ngưỡng ${KPI.pctEmptyMileage.thresholds[1]}% (chuyến rỗng chiều về)`,
+    });
+  // Lane fill rate thấp
+  const lanes = getLaneHealth(filter, 60);
+  const lowFill = lanes.filter((l) => l.fillRateKg < 50).length;
+  if (lowFill > 0)
+    out.push({
+      id: "tp-lowfill",
+      severity: "info",
+      title: "tuyến có fill rate < 50% — cân nhắc gộp chuyến",
+      count: lowFill,
+    });
+  return out;
+}
+
+export function getJourneyAlerts(filter: FilterState): AlertItem[] {
+  const orders = filterOrders(filter);
+  const out: AlertItem[] = [];
+
+  const lost = orders.filter((o) => o.finalStatus === "lost").length;
+  if (lost > 0)
+    out.push({
+      id: "jn-lost",
+      severity: lost > 50 ? "critical" : "warning",
+      title: "đơn thất lạc — cần investigate ngay",
+      count: lost,
+    });
+
+  const exc = orders.filter((o) => o.finalStatus === "exception").length;
+  if (exc > 0)
+    out.push({
+      id: "jn-exc",
+      severity: "warning",
+      title: "đơn exception / hư hỏng",
+      count: exc,
+    });
+
+  const toMs = new Date(filter.to + "T23:59:00").getTime();
+  const stuck = orders.filter(
+    (o) =>
+      o.finalStatus === "in_progress" &&
+      toMs - new Date(o.createdTs).getTime() > 3 * 24 * 3600 * 1000,
+  ).length;
+  if (stuck > 0)
+    out.push({
+      id: "jn-stuck",
+      severity: stuck > 100 ? "critical" : "warning",
+      title: "đơn đang xử lý quá 3 ngày — chưa cập nhật trạng thái cuối",
+      count: stuck,
+    });
+
+  return out;
+}
+
+function formatVNDShort(n: number): string {
+  if (n >= 1_000_000_000) return `${round1(n / 1_000_000_000)} tỷ`;
+  if (n >= 1_000_000) return `${round1(n / 1_000_000)} tr`;
+  return `${Math.round(n / 1000)}k`;
+}
+
+
+// =============================================================================
+// PHASE 7 — Network sub-metrics dạng BẢNG theo vùng (drill xuống BC)
+// =============================================================================
+
+export type NetworkSubMetricRegionRow = {
+  regionCode: RegionCode;
+  regionName: string;
+  totalBc: number;
+  xuatKienOntime: number;  // %
+  choNhapKtc: number;      // phút
+  tgSorting: number;       // phút
+  saiLechKlkt: number;     // %
+  soLanQuaKtc: number;     // lần
+  status: Status;
+};
+
+export function getNetworkSubMetricsByRegion(
+  filter: FilterState,
+): NetworkSubMetricRegionRow[] {
+  const bcs = getBcs();
+  return HEATMAP_REGIONS.map((r) => {
+    const regionBcs = bcs.filter((b) => b.regionCode === r.code);
+    // Deterministic theo region code + penalty
+    const h = r.code.split("").reduce((a, c) => a + c.charCodeAt(0), 0);
+    const factor = REGION_COST_FACTOR[r.code] ?? 1; // vùng xa kém hơn
+    const jit = (base: number, range: number, salt: number) =>
+      round1(base + (((h + salt) % 100) / 100 - 0.5) * 2 * range);
+
+    const xuatKienOntime = round1(jit(95, 2, 1) / factor);
+    const choNhapKtc = round1(jit(34, 8, 2) * factor);
+    const tgSorting = round1(jit(48, 10, 3) * factor);
+    const saiLechKlkt = round1(jit(1.5, 0.6, 4) * factor);
+    const soLanQuaKtc = round1(jit(1.5, 0.3, 5) * factor);
+
+    const status = worstStatus(
+      xuatKienOntime >= 95 ? "green" : xuatKienOntime >= 90 ? "amber" : "red",
+      choNhapKtc <= 30 ? "green" : choNhapKtc <= 45 ? "amber" : "red",
+      tgSorting <= 45 ? "green" : tgSorting <= 60 ? "amber" : "red",
+    );
+
+    return {
+      regionCode: r.code,
+      regionName: r.name,
+      totalBc: regionBcs.length,
+      xuatKienOntime,
+      choNhapKtc,
+      tgSorting,
+      saiLechKlkt,
+      soLanQuaKtc,
+      status,
+    };
+  }).sort((a, b) => b.totalBc - a.totalBc);
+}
+
+/** Sub-metrics chi tiết của từng BC trong 1 vùng (drill). */
+export type BcSubMetricRow = {
+  bcCode: string;
+  bcName: string;
+  province: string;
+  xuatKienOntime: number;
+  choNhapKtc: number;
+  tgSorting: number;
+  saiLechKlkt: number;
+  status: Status;
+};
+
+export function getBcSubMetricsByRegion(
+  filter: FilterState,
+  regionCode: RegionCode,
+  limit = 50,
+): BcSubMetricRow[] {
+  const bcs = getBcs().filter((b) => b.regionCode === regionCode);
+  const orders = filterOrders({ ...filter, regionCode });
+  const orderCount = new Map<string, number>();
+  for (const o of orders)
+    orderCount.set(o.bcGiaoCode, (orderCount.get(o.bcGiaoCode) ?? 0) + 1);
+
+  return bcs
+    .map((b) => {
+      const h = b.code.split("").reduce((a, c) => a + c.charCodeAt(0), 0);
+      const j = (base: number, range: number, salt: number) =>
+        round1(base + (((h + salt) % 100) / 100 - 0.5) * 2 * range);
+      const xuatKienOntime = j(94, 5, 1);
+      const choNhapKtc = j(36, 14, 2);
+      const tgSorting = j(50, 16, 3);
+      const saiLechKlkt = j(1.7, 1, 4);
+      const status = worstStatus(
+        xuatKienOntime >= 95 ? "green" : xuatKienOntime >= 90 ? "amber" : "red",
+        choNhapKtc <= 30 ? "green" : choNhapKtc <= 45 ? "amber" : "red",
+        tgSorting <= 45 ? "green" : tgSorting <= 60 ? "amber" : "red",
+      );
+      return {
+        bcCode: b.code,
+        bcName: b.name,
+        province: b.provinceCode,
+        ordersHandled: orderCount.get(b.code) ?? 0,
+        xuatKienOntime,
+        choNhapKtc,
+        tgSorting,
+        saiLechKlkt,
+        status,
+      };
+    })
+    .sort((a, b) => b.ordersHandled - a.ordersHandled)
+    .slice(0, limit)
+    .map(({ ordersHandled, ...rest }) => {
+      void ordersHandled;
+      return rest;
+    });
+}
+
+// =============================================================================
+// PHASE 7 — Network graph (KTC nodes + lane edges)
+// =============================================================================
+
+export type NetworkGraphNode = {
+  code: string;
+  name: string;
+  region: RegionCode;
+  throughput: number;
+  status: Status;
+};
+
+export type NetworkGraphEdge = {
+  from: string;
+  to: string;
+  trips: number;
+  ontime: number;
+  status: Status;
+};
+
+export function getNetworkGraph(filter: FilterState): {
+  nodes: NetworkGraphNode[];
+  edges: NetworkGraphEdge[];
+} {
+  const trips = filterTrips(filter);
+  const ktcs = getKtcs();
+
+  // Throughput mỗi KTC = số trip đi qua (origin hoặc dest là KTC đó)
+  const tp = new Map<string, number>();
+  for (const t of trips) {
+    if (t.ktcCode) tp.set(t.ktcCode, (tp.get(t.ktcCode) ?? 0) + t.parcels);
+  }
+
+  const nodes: NetworkGraphNode[] = ktcs.map((k) => {
+    const throughput = tp.get(k.code) ?? 0;
+    return {
+      code: k.code,
+      name: k.name,
+      region: k.regionCode,
+      throughput,
+      status: "green",
+    };
+  });
+
+  // Edges = lanes (LH trips between KTCs)
+  const edgeMap = new Map<string, { trips: number; ontimeCount: number }>();
+  for (const t of trips) {
+    if (t.type !== "lh") continue;
+    const key = `${t.originCode}|${t.destCode}`;
+    let cur = edgeMap.get(key);
+    if (!cur) {
+      cur = { trips: 0, ontimeCount: 0 };
+      edgeMap.set(key, cur);
+    }
+    cur.trips += 1;
+    const late =
+      (new Date(t.actualArrive).getTime() - new Date(t.planArrive).getTime()) /
+      60000;
+    if (late <= 15) cur.ontimeCount += 1;
+  }
+
+  const ktcCodes = new Set(ktcs.map((k) => k.code));
+  const edges: NetworkGraphEdge[] = [];
+  for (const [key, e] of edgeMap.entries()) {
+    const [from, to] = key.split("|");
+    if (!ktcCodes.has(from) || !ktcCodes.has(to)) continue;
+    const ontime = round1(pct(e.ontimeCount, e.trips));
+    edges.push({
+      from,
+      to,
+      trips: e.trips,
+      ontime,
+      status: ontime >= 95 ? "green" : ontime >= 90 ? "amber" : "red",
+    });
+  }
+
+  return { nodes, edges: edges.sort((a, b) => b.trips - a.trips).slice(0, 40) };
+}
+
+
+// =============================================================================
+// PHASE 7 — Weekly KPI report (tuần này vs tuần trước)
+// =============================================================================
+
+export type WeeklyKpiRow = {
+  key: string;
+  label: string;
+  unit: "%" | "VND" | "đơn";
+  thisWeek: number;
+  lastWeek: number;
+  delta: number;        // thisWeek - lastWeek
+  target: number;
+  status: Status;
+  higherBetter: boolean;
+};
+
+function shiftRange(from: string, to: string, days: number): { from: string; to: string } {
+  const f = new Date(from + "T00:00:00");
+  const t = new Date(to + "T00:00:00");
+  f.setDate(f.getDate() - days);
+  t.setDate(t.getDate() - days);
+  return { from: f.toISOString().slice(0, 10), to: t.toISOString().slice(0, 10) };
+}
+
+export function getWeeklyKpiReport(filter: FilterState): WeeklyKpiRow[] {
+  // This week = last 7 days ending filter.to; last week = 7 days before that.
+  const thisW: FilterState = { ...filter, from: lastNDays(7, filter.to)[0], to: filter.to };
+  const prev = shiftRange(thisW.from, thisW.to, 7);
+  const lastW: FilterState = { ...filter, from: prev.from, to: prev.to };
+
+  const oThis = filterOrders(thisW);
+  const oLast = filterOrders(lastW);
+  const tThis = filterTrips(thisW);
+  const tLast = filterTrips(lastW);
+  const idThis = new Set(oThis.map((o) => o.orderId));
+  const idLast = new Set(oLast.map((o) => o.orderId));
+
+  const mk = (
+    key: string,
+    label: string,
+    unit: WeeklyKpiRow["unit"],
+    tw: number,
+    lw: number,
+    target: number,
+    green: number,
+    amber: number,
+    higherBetter: boolean,
+  ): WeeklyKpiRow => ({
+    key,
+    label,
+    unit,
+    thisWeek: tw,
+    lastWeek: lw,
+    delta: round1(tw - lw),
+    target,
+    higherBetter,
+    status: higherBetter
+      ? tw >= green
+        ? "green"
+        : tw >= amber
+          ? "amber"
+          : "red"
+      : tw <= green
+        ? "green"
+        : tw <= amber
+          ? "amber"
+          : "red",
+  });
+
+  return [
+    mk("ontime", "Ontime Network", "%", computeOntimeNetwork(oThis), computeOntimeNetwork(oLast), 90, 90, 88, true),
+    mk("tc", "% Giao thành công", "%", computePctTc(idThis), computePctTc(idLast), 92, 92, 88, true),
+    mk("fd", "FD (Failed Delivery)", "%", computeFailedDeliveryRate(idThis), computeFailedDeliveryRate(idLast), 5, 5, 10, false),
+    mk("hang4ca", "% Hàng về BC ≥4 ca", "%", computeHangVeBc4Ca(oThis), computeHangVeBc4Ca(oLast), 90, 90, 85, true),
+    mk("doikho", "Tỷ lệ đổi kho", "%", computeDoiKhoOverall(oThis), computeDoiKhoOverall(oLast), 1.5, 1.5, 2.3, false),
+    mk("costkg", "Cost / kg", "VND", computeCostPerKg(tThis), computeCostPerKg(tLast), 1853, 1970, 2057, false),
+    mk("ontimeVT", "Ontime vận tải", "%", computeOntimeVanTai(tThis), computeOntimeVanTai(tLast), 95, 95, 93, true),
+    mk("fillkg", "Fill rate kg", "%", computeFillRateKg(tThis), computeFillRateKg(tLast), 75, 75, 60, true),
+    mk("empty", "% Empty mileage", "%", computeEmptyMileage(tThis), computeEmptyMileage(tLast), 20, 20, 30, false),
+    mk("volume", "Sản lượng", "đơn", oThis.length, oLast.length, 0, 0, 0, true),
   ];
 }

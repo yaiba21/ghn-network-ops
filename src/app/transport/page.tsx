@@ -5,6 +5,7 @@ import { useFilter } from "@/components/filter/FilterContext";
 import {
   getLaneCodesForFilter,
   getLaneHealth,
+  getTransportAlerts,
   getTransportByCarrier,
   getTransportByRouteType,
   getTransportKpis,
@@ -14,6 +15,7 @@ import { dataUpdatedAt } from "@/lib/mock-data";
 import { KPI, statusFromValue } from "@/lib/kpi-config";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { FilterBar } from "@/components/filter/FilterBar";
+import { AlertBanner } from "@/components/ui/AlertBanner";
 import { DimensionSelect } from "@/components/filter/DimensionSelect";
 import { Card } from "@/components/ui/Card";
 import { DataTable, type Column } from "@/components/ui/DataTable";
@@ -36,6 +38,7 @@ export default function TransportPage() {
   const routeTypes = useMemo(() => getTransportByRouteType(filter), [filter]);
   const laneHealth = useMemo(() => getLaneHealth(filter, 30), [filter]);
   const laneOpts = useMemo(() => getLaneCodesForFilter(filter), [filter]);
+  const alerts = useMemo(() => getTransportAlerts(filter), [filter]);
   const updated = dataUpdatedAt();
 
   return (
@@ -70,6 +73,8 @@ export default function TransportPage() {
           />
         }
       />
+
+      {alerts.length > 0 && <AlertBanner alerts={alerts} />}
 
       {/* === KPI vận tải (mở rộng) === */}
       <section className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">

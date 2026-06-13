@@ -3,8 +3,9 @@
 import { useMemo } from "react";
 import { useFilter } from "@/components/filter/FilterContext";
 import {
-  getDoiKhoCompare,
+  getDoiKhoBreakdown,
   getRevertReasons,
+  getRoutingAlerts,
   getRoutingChannelFlow,
   getRoutingHeaderKpis,
   getRoutingRegionComparison,
@@ -13,6 +14,7 @@ import {
 import { dataUpdatedAt } from "@/lib/mock-data";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { FilterBar } from "@/components/filter/FilterBar";
+import { AlertBanner } from "@/components/ui/AlertBanner";
 import { Card } from "@/components/ui/Card";
 import { KpiCardFrom } from "@/components/ui/KpiCard";
 import { Donut } from "@/components/ui/Donut";
@@ -35,7 +37,8 @@ export default function RoutingPage() {
   const channelFlow = useMemo(() => getRoutingChannelFlow(filter), [filter]);
   const revertReasons = useMemo(() => getRevertReasons(filter), [filter]);
   const topBcs = useMemo(() => getTopRevertBcs(filter, 20), [filter]);
-  const doiKho = useMemo(() => getDoiKhoCompare(filter), [filter]);
+  const doiKhoBreakdown = useMemo(() => getDoiKhoBreakdown(filter), [filter]);
+  const alerts = useMemo(() => getRoutingAlerts(filter), [filter]);
   const updated = dataUpdatedAt();
 
   const totalRevert = revertReasons.reduce((a, b) => a + b.count, 0);
@@ -64,6 +67,8 @@ export default function RoutingPage() {
         }}
       />
 
+      {alerts.length > 0 && <AlertBanner alerts={alerts} />}
+
       {/* === Header KPI === */}
       <section className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         <KpiCardFrom kpi={header.phanTuyenDung} size="sm" />
@@ -91,17 +96,15 @@ export default function RoutingPage() {
         </div>
       </section>
 
-      {/* === 3 metric đổi kho phân biệt mẫu số === */}
+      {/* === Đổi kho breakdown: overall + HCM/HN × phường mới/cũ === */}
       <Card
-        title="3 chỉ số đổi kho — chú ý khác mẫu số"
-        subtitle="Đừng trộn 3 chỉ số: overall / địa chỉ mới / địa chỉ cũ. Mỗi cái tính trên mẫu số khác nhau."
+        title="Tỷ lệ đổi kho — breakdown từ overall"
+        subtitle="Overall toàn bộ, rồi tách theo HCM/HN × phường mới/cũ. HN & HCM phường mới cao nhất."
       >
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-          <DoiKhoStat label="Overall" value={doiKho.overall} denom="Tất cả đơn" target={1.5} warn={2.3} />
-          <DoiKhoStat label="Địa chỉ mới" value={doiKho.newAddress} denom="Chỉ đơn địa chỉ mới" target={6} warn={10} />
-          <DoiKhoStat label="Địa chỉ cũ" value={doiKho.oldAddress} denom="Chỉ đơn địa chỉ cũ" target={2} warn={4} />
-          <DoiKhoStat label="HN địa chỉ mới" value={doiKho.hnNewAddress} denom="Đơn HN địa chỉ mới" target={10} warn={17} hint="HN cao gấp ~2× tỉnh khác" />
-          <DoiKhoStat label="HCM địa chỉ mới" value={doiKho.hcmNewAddress} denom="Đơn HCM địa chỉ mới" target={10} warn={14} hint="HCM cao gấp ~2× tỉnh khác" />
+        <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+          {doiKhoBreakdown.map((d) => (
+            <DoiKhoStat key={d.key} item={d} />
+          ))}
         </div>
       </Card>
 
@@ -203,19 +206,27 @@ export default function RoutingPage() {
 }
 
 function DoiKhoStat({
-  label, value, denom, target, warn, hint,
+  item,
 }: {
-  label: string; value: number; denom: string; target: number; warn: number; hint?: string;
+  item: ReturnType<typeof getDoiKhoBreakdown>[number];
 }) {
-  const status = value <= target ? "green" : value <= warn ? "amber" : "red";
-  const colorCls = status === "green" ? "text-emerald-600" : status === "amber" ? "text-amber-600" : "text-red-600";
+  const colorCls =
+    item.status === "green"
+      ? "text-emerald-600"
+      : item.status === "amber"
+        ? "text-amber-600"
+        : "text-red-600";
   return (
     <div className="border border-[var(--color-border)] rounded-md p-3">
-      <div className="text-[11px] uppercase tracking-wide text-[var(--color-text-muted)]">{label}</div>
-      <div className={cn("mt-1 text-2xl font-semibold tabular-nums", colorCls)}>{formatPct(value, 1)}</div>
-      <div className="text-[10px] text-[var(--color-text-muted)] mt-1">Mẫu số: {denom}</div>
-      <div className="text-[10px] text-[var(--color-text-muted)] tabular-nums">Mục tiêu ≤ {target}% · Cảnh báo &gt; {warn}%</div>
-      {hint && <div className="text-[10px] text-amber-700 mt-1">{hint}</div>}
+      <div className="text-[11px] uppercase tracking-wide text-[var(--color-text-muted)]">
+        {item.label}
+      </div>
+      <div className={cn("mt-1 text-2xl font-semibold tabular-nums", colorCls)}>
+        {formatPct(item.rate, 1)}
+      </div>
+      <div className="text-[10px] text-[var(--color-text-muted)] mt-1 tabular-nums">
+        {formatCompactInt(item.count)} / {formatCompactInt(item.segmentTotal)} đơn
+      </div>
     </div>
   );
 }
