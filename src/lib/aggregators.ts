@@ -2862,27 +2862,27 @@ export function getTransportMap(
     })
     .filter((n): n is MapNode => n !== null);
 
-  // Routes: lấy LH trips (KTC↔KTC) để vẽ tuyến rõ ràng nhất
-  const lhTrips = trips
-    .filter((t) => t.type === "lh")
+  // Routes: lấy top trips theo parcels, mỗi route = CHUỖI ĐIỂM CHẠM ĐẦY ĐỦ
+  // (BC lấy → KTC → KTC → BC giao) qua getTripDetail.
+  const topTrips = trips
+    .filter((t) => t.type === "lh" || t.type === "lm")
     .sort((a, b) => b.parcels - a.parcels)
     .slice(0, maxRoutes);
 
-  const routes: MapTripRoute[] = lhTrips
+  const routes: MapTripRoute[] = topTrips
     .map((t) => {
-      const og = geoOf(t.originCode);
-      const dg = geoOf(t.destCode);
-      if (!og || !dg) return null;
-      const late =
-        (new Date(t.actualArrive).getTime() - new Date(t.planArrive).getTime()) /
-        60000;
+      const detail = getTripDetail(t.tripId);
+      if (!detail || detail.stops.length < 2) return null;
       return {
         tripId: t.tripId,
-        status: (late <= 15 ? "green" : late <= 60 ? "amber" : "red") as Status,
-        stops: [
-          { code: t.originCode, lat: og.lat, lng: og.lng, order: 1, label: t.originCode },
-          { code: t.destCode, lat: dg.lat, lng: dg.lng, order: 2, label: t.destCode },
-        ],
+        status: detail.status,
+        stops: detail.stops.map((s) => ({
+          code: s.code,
+          lat: s.lat,
+          lng: s.lng,
+          order: s.order,
+          label: s.name,
+        })),
       };
     })
     .filter((r): r is MapTripRoute => r !== null);
@@ -3204,6 +3204,8 @@ export type TripStop = {
   dwellMin: number;
   cumulativeMin: number;
   status: Status;
+  lat: number;
+  lng: number;
 };
 
 export type TripDetail = {
@@ -3247,25 +3249,57 @@ export function getTripDetail(tripId: string): TripDetail | null {
   );
   const st: Status = lateMin <= 15 ? "green" : lateMin <= 60 ? "amber" : "red";
 
+  // Dựng CHUỖI ĐIỂM CHẠM ĐẦY ĐỦ của hành trình đơn mà chuyến này thuộc về:
+  //   BC lấy → KTC gom → [KTC trung chuyển] → BC giao
+  // (đôi khi BC giao ↔ BC lấy trực tiếp nếu cùng địa bàn)
   const rng = seededRand(tripId);
+  const allKtc = getKtcs();
+  const allBc = getBcs();
+  const pickBc = () => allBc[Math.floor(rng() * allBc.length)];
+  const pickKtc = (exclude: string[] = []) => {
+    const pool = allKtc.filter((k) => !exclude.includes(k.code));
+    return pool[Math.floor(rng() * pool.length)];
+  };
+
   const chain: { code: string; role: string }[] = [];
-  if (t.type === "fm") {
-    chain.push({ code: t.originCode, role: "Điểm lấy (BC)" });
-    chain.push({ code: t.destCode, role: "Nhập KTC" });
-  } else if (t.type === "lm") {
-    chain.push({ code: t.originCode, role: "Xuất KTC" });
-    chain.push({ code: t.destCode, role: "Điểm giao (BC)" });
-  } else if (t.type === "rt") {
-    chain.push({ code: t.originCode, role: "Nhận hoàn (BC)" });
-    chain.push({ code: t.destCode, role: "Nhập KTC hoàn" });
+  const directBcToBc = rng() < 0.12; // ~12% giao thẳng BC → BC cùng địa bàn
+
+  if (directBcToBc) {
+    chain.push({ code: pickBc().code, role: "Lấy tại BC" });
+    chain.push({ code: pickBc().code, role: "Giao tại BC (cùng địa bàn)" });
   } else {
-    chain.push({ code: t.originCode, role: "KTC xuất phát" });
-    const others = getKtcs().filter((k) => k.code !== t.originCode && k.code !== t.destCode);
-    if (others.length && rng() < 0.4) {
-      const mid = others[Math.floor(rng() * others.length)];
-      chain.push({ code: mid.code, role: "KTC trung chuyển" });
+    // BC lấy
+    const bcLay =
+      t.type === "fm" || t.type === "rt"
+        ? (nodeKind(t.originCode) === "BC" ? t.originCode : pickBc().code)
+        : pickBc().code;
+    chain.push({ code: bcLay, role: "Lấy tại BC" });
+
+    // KTC gom (ưu tiên KTC liên quan tới trip)
+    const ktc1 =
+      nodeKind(t.originCode) === "KTC"
+        ? t.originCode
+        : nodeKind(t.destCode) === "KTC"
+          ? t.destCode
+          : pickKtc().code;
+    chain.push({ code: ktc1, role: "Nhập KTC gom" });
+
+    // KTC trung chuyển (1-2 hop)
+    const hops = rng() < 0.5 ? 1 : rng() < 0.85 ? 2 : 0;
+    let lastKtc = ktc1;
+    for (let h = 0; h < hops; h++) {
+      const mid =
+        h === 0 && nodeKind(t.destCode) === "KTC" && t.destCode !== ktc1
+          ? t.destCode
+          : pickKtc([ktc1, lastKtc]).code;
+      chain.push({ code: mid, role: `KTC trung chuyển ${h + 1}` });
+      lastKtc = mid;
     }
-    chain.push({ code: t.destCode, role: "KTC đích" });
+
+    // BC giao
+    const bcGiao =
+      t.type === "lm" && nodeKind(t.destCode) === "BC" ? t.destCode : pickBc().code;
+    chain.push({ code: bcGiao, role: "Giao tại BC" });
   }
 
   const legCount = chain.length - 1;
@@ -3276,6 +3310,8 @@ export function getTripDetail(tripId: string): TripDetail | null {
     const arrive = i === 0 ? departMs : cursor;
     const dwellMin = isLast ? 0 : 10 + Math.floor(rng() * 30);
     const depart = arrive + dwellMin * 60000;
+    const g = geoOf(chain[i].code) ?? { lat: 16, lng: 107 };
+    const jrng = seededRand(chain[i].code + ":" + tripId);
     stops.push({
       order: i + 1,
       code: chain[i].code,
@@ -3287,6 +3323,8 @@ export function getTripDetail(tripId: string): TripDetail | null {
       dwellMin,
       cumulativeMin: Math.round((depart - departMs) / 60000),
       status: st,
+      lat: g.lat + (jrng() - 0.5) * 0.12,
+      lng: g.lng + (jrng() - 0.5) * 0.14,
     });
     if (!isLast) {
       const legMin = Math.max(20, Math.round((totalMin - chain.length * 20) / Math.max(1, legCount)));
@@ -3306,7 +3344,7 @@ export function getTripDetail(tripId: string): TripDetail | null {
     actualDepart: t.actualDepart,
     planArrive: t.planArrive,
     actualArrive: t.actualArrive,
-    totalDurationMin: totalMin,
+    totalDurationMin: stops.length ? stops[stops.length - 1].cumulativeMin : totalMin,
     lateMin,
     status: st,
     stops,

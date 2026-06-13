@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { X } from "lucide-react";
+import dynamic from "next/dynamic";
 import { useFilter } from "@/components/filter/FilterContext";
 import {
   getLaneCodesForFilter,
@@ -19,13 +19,23 @@ import { KPI, statusFromValue } from "@/lib/kpi-config";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { FilterBar } from "@/components/filter/FilterBar";
 import { AlertBanner } from "@/components/ui/AlertBanner";
-import { VietnamMap } from "@/components/ui/VietnamMap";
 import { TripTimeline } from "@/components/ui/TripTimeline";
+import { Modal } from "@/components/ui/Modal";
 import { DimensionSelect } from "@/components/filter/DimensionSelect";
 import { Card } from "@/components/ui/Card";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { KpiCard } from "@/components/ui/KpiCard";
+
+// Leaflet cần window → client-only
+const LeafletTransportMap = dynamic(
+  () => import("@/components/ui/LeafletTransportMap").then((m) => m.LeafletTransportMap),
+  { ssr: false, loading: () => <div className="h-[560px] ghn-skeleton rounded-md" /> },
+);
+const TripRouteMap = dynamic(
+  () => import("@/components/ui/TripRouteMap").then((m) => m.TripRouteMap),
+  { ssr: false, loading: () => <div className="h-[300px] ghn-skeleton rounded-md" /> },
+);
 import {
   formatCompactInt,
   formatHours,
@@ -108,12 +118,12 @@ export default function TransportPage() {
         <KpiCard label="Leadtime LTC" value={kpis.leadtimeLtcH} unit="h" deltaPct={0} status={kpis.leadtimeLtcH <= 4 ? "green" : kpis.leadtimeLtcH <= 6 ? "amber" : "red"} direction="lower-better" target={4} size="sm" />
       </section>
 
-      {/* === GPS map tuyến + stop points === */}
+      {/* === Leaflet map tuyến + điểm chạm === */}
       <Card
-        title="Bản đồ tuyến vận tải — KTC + stop points"
-        subtitle="KTC chấm cam (size = throughput), tuyến linehaul nối điểm đi → đến (màu theo ontime). Hover tuyến bên phải để highlight."
+        title="Bản đồ tuyến vận tải — KTC + điểm chạm"
+        subtitle="Bản đồ thật. KTC chấm cam (size = parcels). Hover/chọn 1 tuyến bên phải → hiện chuỗi điểm chạm (BC lấy → KTC → BC giao) với marker từng điểm."
       >
-        <VietnamMap nodes={map.nodes} routes={map.routes} />
+        <LeafletTransportMap nodes={map.nodes} routes={map.routes} />
       </Card>
 
       {/* === Bảng sức khoẻ tuyến === */}
@@ -148,24 +158,21 @@ export default function TransportPage() {
         />
       </Card>
 
-      {/* === Trip detail timeline === */}
-      {tripDetail && (
-        <Card
-          title={`Hành trình chuyến ${tripDetail.tripId}`}
-          subtitle="Các điểm chạm theo thứ tự: BC/KTC, giờ đến/rời, thời gian dừng, tổng thời lượng tích luỹ."
-          actions={
-            <button
-              type="button"
-              onClick={() => setSelectedTrip(null)}
-              className="inline-flex items-center gap-1 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-            >
-              <X className="w-3.5 h-3.5" /> Đóng
-            </button>
-          }
-        >
-          <TripTimeline detail={tripDetail} />
-        </Card>
-      )}
+      {/* === Trip detail popup (modal) === */}
+      <Modal
+        open={!!tripDetail}
+        onClose={() => setSelectedTrip(null)}
+        title={tripDetail ? `Hành trình chuyến ${tripDetail.tripId}` : ""}
+        subtitle="Chuỗi điểm chạm theo thứ tự (BC lấy → KTC → KTC → BC giao). Bản đồ + timeline giờ đến/rời, thời gian dừng, tổng thời lượng tích luỹ."
+        widthClass="max-w-5xl"
+      >
+        {tripDetail && (
+          <div className="space-y-4">
+            <TripRouteMap stops={tripDetail.stops} status={tripDetail.status} height={280} />
+            <TripTimeline detail={tripDetail} />
+          </div>
+        )}
+      </Modal>
 
       {/* === Carriers + Route types === */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
