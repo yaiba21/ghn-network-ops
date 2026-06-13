@@ -25,8 +25,22 @@ import { Card } from "@/components/ui/Card";
 import { KpiCardFrom } from "@/components/ui/KpiCard";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import { StatusBadge } from "@/components/ui/StatusBadge";
+import dynamic from "next/dynamic";
 import { OdMatrix } from "@/components/ui/OdMatrix";
-import { TerritoryMap } from "@/components/ui/TerritoryMap";
+
+// Leaflet cần window → load client-only, tránh SSR error
+const LeafletTerritoryMap = dynamic(
+  () =>
+    import("@/components/ui/LeafletTerritoryMap").then(
+      (m) => m.LeafletTerritoryMap,
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="h-[560px] ghn-skeleton rounded-md" />
+    ),
+  },
+);
 import { REGION_LABEL_VI, type RegionCode } from "@/lib/types";
 import {
   cn,
@@ -202,7 +216,7 @@ export default function NetworkPage() {
           />
         }
       >
-        <TerritoryMap data={territory} />
+        <LeafletTerritoryMap data={territory} />
       </Card>
 
       {/* === Network sub-metrics dạng bảng theo vùng (drill BC) === */}

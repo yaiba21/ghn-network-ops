@@ -15,6 +15,7 @@ import {
   getProvinces,
 } from "./mock-data";
 import { KPI, statusFromValue } from "./kpi-config";
+import { REGION_LABEL_VI } from "./types";
 import type {
   AlertItem,
   FactOrder,
@@ -2900,6 +2901,19 @@ export type TerritoryBc = {
   cx: number;
   cy: number;
   polygon: { x: number; y: number }[];
+  // GPS thật cho Leaflet
+  lat: number;
+  lng: number;
+  coverageKm: number;       // bán kính vùng phủ (km) → vẽ circle
+  // Thuộc tính kho
+  regionName: string;
+  ktcCode: string;          // kho trực thuộc
+  areaKm2: number;          // diện tích hoạt động
+  loaiKho: string;          // loại kho
+  loaiHoatDong: string;     // Lấy / Trả / Hỗn hợp
+  loaiDichVu: string;       // Thường / B2B / KHL / Ahamove
+  loaiHangBc: string;       // Tiêu chuẩn / Cồng kềnh / Nặng
+  // Số liệu
   donLay: number;
   donGiao: number;
   donTrongKho: number;
@@ -3002,6 +3016,26 @@ export function getTerritoryMap(
 
   let totalLay = 0, totalGiao = 0, totalKho = 0, totalSapVc = 0;
 
+  // GPS centroid của tỉnh (PROVINCE_GEO định nghĩa ở phần transport map)
+  const centroid = PROVINCE_GEO[provinceCode] ?? { lat: 16, lng: 107 };
+
+  const LOAI_HD: Record<string, string> = {
+    lay: "Chuyên lấy",
+    tra: "Chuyên trả",
+    "hon-hop": "Hỗn hợp (lấy + giao + trả)",
+  };
+  const LOAI_DV: Record<string, string> = {
+    thuong: "Thường",
+    b2b: "B2B",
+    khl: "KHL",
+    ahamove: "Ahamove",
+  };
+  const LOAI_HANG: Record<string, string> = {
+    "tieu-chuan": "Tiêu chuẩn",
+    "cong-kenh": "Cồng kềnh",
+    nang: "Nặng",
+  };
+
   const bcs: TerritoryBc[] = bcsInProvince.map((b, i) => {
     const rng = seededRand(b.code);
     const col = i % cols;
@@ -3028,12 +3062,29 @@ export function getTerritoryMap(
       ontimeLay >= 90 ? "green" : ontimeLay >= 85 ? "amber" : "red",
     );
 
+    // GPS thật: scatter quanh centroid tỉnh (±0.12 độ ~ ±13km)
+    const lat = centroid.lat + (rng() - 0.5) * 0.24;
+    const lng = centroid.lng + (rng() - 0.5) * 0.28;
+    const areaKm2 = Math.round(8 + rng() * 52);
+    const coverageKm = round1(Math.sqrt(areaKm2 / Math.PI)); // bán kính tương đương
+    // Loại kho: theo sản lượng giao
+    const loaiKho =
+      donGiao > 600 ? "Kho lớn (hub vùng)" : donGiao > 250 ? "Kho thường" : "Kho vệ tinh";
+
     return {
       bcCode: b.code,
       bcName: b.name,
       color: TERRITORY_PALETTE[i % TERRITORY_PALETTE.length],
       cx, cy,
       polygon: blobPolygon(rng, cx, cy, r),
+      lat, lng, coverageKm,
+      regionName: REGION_LABEL_VI[b.regionCode],
+      ktcCode: b.ktcCode,
+      areaKm2,
+      loaiKho,
+      loaiHoatDong: LOAI_HD[b.loaiHoatDong] ?? b.loaiHoatDong,
+      loaiDichVu: LOAI_DV[b.loaiDichVu] ?? b.loaiDichVu,
+      loaiHangBc: LOAI_HANG[b.loaiHangBc] ?? b.loaiHangBc,
       donLay, donGiao, donTrongKho, donSapVc, ontimeLay, ontimeGiao, status,
     };
   });
