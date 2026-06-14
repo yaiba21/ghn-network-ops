@@ -790,6 +790,11 @@ export type PulseGaugeData = {
   unit: string;
 };
 
+/**
+ * Sub-metrics Tổng Quan — KHÔNG trùng North Star.
+ * North Star = Ontime Network · Cost/kg · % Hàng ≥4 ca · FD · Ontime vận
+ * tải · Đổi kho overall. Sub-metrics đào sâu các khía cạnh khác.
+ */
 export function getOverviewPulseGauges(filter: FilterState): PulseGaugeData[] {
   const trips = filterTrips(filter);
   const orders = filterOrders(filter);
@@ -798,12 +803,13 @@ export function getOverviewPulseGauges(filter: FilterState): PulseGaugeData[] {
 
   const fillKg = computeFillRateKg(trips);
   const fillOrder = computeFillRateOrder(trips);
-  const ontime = computeOntimeNetwork(orders);
-  const ovt = computeOntimeVanTai(trips);
   const tc = computePctTc(orderIds);
   const ltc = computePctLtc(pickups);
-  const dk = computeDoiKhoOverall(orders);
-  const fd = computeFailedDeliveryRate(orderIds);
+  const dkOverall = computeDoiKhoOverall(orders);
+  const phanTuyen = round1(100 - dkOverall);
+  const dkMoi = computeDoiKhoMoi(orders);
+  const empty = computeEmptyMileage(trips);
+  const ndd = computeNddAchieve(orders);
 
   return [
     {
@@ -821,45 +827,45 @@ export function getOverviewPulseGauges(filter: FilterState): PulseGaugeData[] {
       unit: "%",
     },
     {
-      label: "Ontime Network",
-      value: ontime,
-      target: KPI.ontimeNetwork.target,
-      status: statusFromValue(KPI.ontimeNetwork, ontime),
-      unit: "%",
-    },
-    {
-      label: "Ontime vận tải",
-      value: ovt,
-      target: KPI.ontimeVanTai.target,
-      status: statusFromValue(KPI.ontimeVanTai, ovt),
-      unit: "%",
-    },
-    {
-      label: "% Giao thành công",
+      label: "%GTC",
       value: tc,
       target: KPI.pctTC.target,
       status: statusFromValue(KPI.pctTC, tc),
       unit: "%",
     },
     {
-      label: "% LTC pickup",
+      label: "Ontime lấy (LTC)",
       value: ltc,
       target: KPI.pctLTC.target,
       status: statusFromValue(KPI.pctLTC, ltc),
       unit: "%",
     },
     {
-      label: "% Đổi kho",
-      value: dk,
-      target: KPI.doiKhoOverall.target,
-      status: statusFromValue(KPI.doiKhoOverall, dk),
+      label: "% Phân tuyến đúng",
+      value: phanTuyen,
+      target: KPI.pctPhanTuyenDung.target,
+      status: statusFromValue(KPI.pctPhanTuyenDung, phanTuyen),
       unit: "%",
     },
     {
-      label: "FD (Fail Delivery)",
-      value: fd,
-      target: KPI.fdRate.target,
-      status: statusFromValue(KPI.fdRate, fd),
+      label: "% Đổi kho mới",
+      value: dkMoi,
+      target: KPI.doiKhoMoi.target,
+      status: statusFromValue(KPI.doiKhoMoi, dkMoi),
+      unit: "%",
+    },
+    {
+      label: "% Empty mileage",
+      value: empty,
+      target: KPI.pctEmptyMileage.target,
+      status: statusFromValue(KPI.pctEmptyMileage, empty),
+      unit: "%",
+    },
+    {
+      label: "NDD Achieve",
+      value: ndd,
+      target: KPI.nddAchieve.target,
+      status: statusFromValue(KPI.nddAchieve, ndd),
       unit: "%",
     },
   ];
