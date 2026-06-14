@@ -3389,3 +3389,58 @@ export function getEngineResolveLayers(filter: FilterState): EngineResolveLayer[
     { key: "mac-dinh", label: "Mặc định", pct: macDinh, color: "#e8a33d" },
   ];
 }
+
+
+// =============================================================================
+// PHASE 12 — ORS: So sánh BC lấy/giao theo 3 loại hàng
+// =============================================================================
+
+export type RoutingCargoRow = {
+  loaiHang: string;
+  label: string;
+  donLay: number;       // đơn tại BC lấy (theo loại hàng)
+  donGiao: number;      // đơn tại BC giao
+  doiKho: number;       // % đổi kho
+  phanTuyenDung: number;// % phân tuyến đúng (proxy = 100 - đổi kho)
+  ontimeGiao: number;   // % giao ontime
+  color: string;
+};
+
+export function getRoutingCargoComparison(filter: FilterState): RoutingCargoRow[] {
+  const orders = filterOrders(filter);
+  const defs: { code: string; label: string; color: string }[] = [
+    { code: "tieu-chuan", label: "Tiêu chuẩn", color: "#3f8a6e" },
+    { code: "cong-kenh", label: "Cồng kềnh", color: "#e8a33d" },
+    { code: "nang", label: "Nặng", color: "#b85850" },
+  ];
+
+  return defs.map((d) => {
+    const pool = orders.filter((o) => o.loaiHang === d.code);
+    const donLay = pool.length; // mỗi đơn được lấy 1 lần
+    const delivered = pool.filter((o) => o.deliveredTs);
+    const donGiao = delivered.length;
+    const doiKho =
+      pool.length > 0
+        ? round1(pct(pool.filter((o) => o.isChangedWarehouse).length, pool.length))
+        : 0;
+    const ontimeGiao =
+      delivered.length > 0
+        ? round1(
+            pct(
+              delivered.filter((o) => o.deliveredTs! <= o.promisedTs).length,
+              delivered.length,
+            ),
+          )
+        : 0;
+    return {
+      loaiHang: d.code,
+      label: d.label,
+      donLay,
+      donGiao,
+      doiKho,
+      phanTuyenDung: round1(100 - doiKho),
+      ontimeGiao,
+      color: d.color,
+    };
+  });
+}

@@ -7,6 +7,7 @@ import {
   getEngineResolveLayers,
   getRevertReasons,
   getRoutingAlerts,
+  getRoutingCargoComparison,
   getRoutingChannelFlow,
   getRoutingHeaderKpis,
   getRoutingRegionComparison,
@@ -40,6 +41,7 @@ export default function RoutingPage() {
   const topBcs = useMemo(() => getTopRevertBcs(filter, 20), [filter]);
   const doiKhoBreakdown = useMemo(() => getDoiKhoBreakdown(filter), [filter]);
   const engineLayers = useMemo(() => getEngineResolveLayers(filter), [filter]);
+  const cargoRows = useMemo(() => getRoutingCargoComparison(filter), [filter]);
   const alerts = useMemo(() => getRoutingAlerts(filter), [filter]);
   const updated = dataUpdatedAt();
 
@@ -155,6 +157,49 @@ export default function RoutingPage() {
         subtitle="Mỗi channel theo polygon layer riêng: SPE = Zone-based · TTS = Phường cũ · SME = Phường mới · B2B = Freight. 3 cột đổi kho phân biệt mẫu số."
       >
         <DataTable columns={channelColumns} data={channelFlow} rowKey={(r) => r.channel} />
+      </Card>
+
+      {/* === So sánh theo loại hàng — BC lấy/giao === */}
+      <Card
+        title="So sánh theo loại hàng — BC lấy / BC giao"
+        subtitle="Tiêu chuẩn / Cồng kềnh / Nặng: lượng đơn lấy & giao, % đổi kho, % phân tuyến đúng, ontime giao. Hàng cồng kềnh/nặng thường đổi kho + trễ nhiều hơn."
+      >
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {cargoRows.map((c) => (
+            <div
+              key={c.loaiHang}
+              className="border border-[var(--color-border)] rounded-md overflow-hidden"
+            >
+              <div className="h-1" style={{ backgroundColor: c.color }} />
+              <div className="p-3">
+                <div className="text-sm font-semibold text-[var(--color-text)] mb-2">
+                  {c.label}
+                </div>
+                <div className="grid grid-cols-2 gap-2 mb-3">
+                  <div className="bg-[var(--color-hover)] rounded p-2">
+                    <div className="text-[10px] uppercase tracking-wide text-[var(--color-text-muted)]">
+                      Đơn BC lấy
+                    </div>
+                    <div className="text-lg font-semibold tabular-nums">
+                      {formatCompactInt(c.donLay)}
+                    </div>
+                  </div>
+                  <div className="bg-[var(--color-hover)] rounded p-2">
+                    <div className="text-[10px] uppercase tracking-wide text-[var(--color-text-muted)]">
+                      Đơn BC giao
+                    </div>
+                    <div className="text-lg font-semibold tabular-nums">
+                      {formatCompactInt(c.donGiao)}
+                    </div>
+                  </div>
+                </div>
+                <CargoBar label="% Đổi kho" value={c.doiKho} good={c.doiKho <= 2.3} lowerBetter />
+                <CargoBar label="% Phân tuyến đúng" value={c.phanTuyenDung} good={c.phanTuyenDung >= 98.5} />
+                <CargoBar label="Ontime giao" value={c.ontimeGiao} good={c.ontimeGiao >= 90} />
+              </div>
+            </div>
+          ))}
+        </div>
       </Card>
 
       {/* === Top BC đổi kho + lý do === */}
@@ -298,6 +343,36 @@ const channelColumns: Column<ReturnType<typeof getRoutingChannelFlow>[number]>[]
     render: (r) => <span className={r.doiKhoOldAddr <= 2 ? "text-emerald-600" : r.doiKhoOldAddr <= 4 ? "text-amber-600" : "text-red-600"}>{formatPct(r.doiKhoOldAddr, 1)}</span>,
   },
 ];
+
+function CargoBar({
+  label,
+  value,
+  good,
+  lowerBetter,
+}: {
+  label: string;
+  value: number;
+  good: boolean;
+  lowerBetter?: boolean;
+}) {
+  const color = good ? "#10b981" : "#f59e0b";
+  // width: với lower-better, scale ngược cho dễ đọc (đầy = tốt)
+  const width = lowerBetter ? Math.max(8, 100 - value * 6) : Math.min(100, value);
+  return (
+    <div className="mb-1.5">
+      <div className="flex items-center justify-between text-[11px] mb-0.5">
+        <span className="text-[var(--color-text-muted)]">{label}</span>
+        <span className="font-semibold tabular-nums">{formatPct(value, 1)}</span>
+      </div>
+      <div className="h-1.5 bg-[var(--color-hover)] rounded-full overflow-hidden">
+        <div
+          className="h-full rounded-full"
+          style={{ width: `${width}%`, backgroundColor: color }}
+        />
+      </div>
+    </div>
+  );
+}
 
 const topBcColumns: Column<ReturnType<typeof getTopRevertBcs>[number]>[] = [
   { key: "bcName", label: "Bưu cục", render: (r) => <span className="font-medium truncate">{r.bcName}</span> },

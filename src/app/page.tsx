@@ -90,34 +90,32 @@ export default function OverallPage() {
         </div>
       </section>
 
-      {/* === Module health + Pulse gauges === */}
-      <section className="grid grid-cols-1 xl:grid-cols-3 gap-3">
-        <div className="xl:col-span-2">
-          <div className="text-[11px] uppercase tracking-wide text-[var(--color-text-muted)] mb-2">
-            Sức khoẻ theo mô-đun (click drill xuống trang chi tiết)
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-            {/* Last Mile xếp cuối theo flow đơn */}
-            <ModuleHealthCard module={modules[0]} href="#chang-van-hanh" />
-            <ModuleHealthCard module={modules[1]} href="/network" />
-            <ModuleHealthCard module={modules[3]} href="/routing" />
-            <ModuleHealthCard module={modules[4]} href="/transport" />
-            <ModuleHealthCard module={modules[2]} href="#chang-van-hanh" />
-          </div>
+      {/* === Module health === */}
+      <section>
+        <div className="text-[11px] uppercase tracking-wide text-[var(--color-text-muted)] mb-2">
+          Sức khoẻ theo mô-đun (click drill xuống trang chi tiết)
         </div>
-        <div>
-          <div className="text-[11px] uppercase tracking-wide text-[var(--color-text-muted)] mb-2">
-            Pulse realtime ({gauges.length} chỉ số)
-          </div>
-          <Card>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              {gauges.map((g) => (
-                <PulseGauge key={g.label} data={g} />
-              ))}
-            </div>
-          </Card>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+          {/* Last Mile xếp cuối theo flow đơn */}
+          <ModuleHealthCard module={modules[0]} href="#chang-van-hanh" />
+          <ModuleHealthCard module={modules[1]} href="/network" />
+          <ModuleHealthCard module={modules[3]} href="/routing" />
+          <ModuleHealthCard module={modules[4]} href="/transport" />
+          <ModuleHealthCard module={modules[2]} href="#chang-van-hanh" />
         </div>
       </section>
+
+      {/* === Pulse realtime (section riêng, full-width) === */}
+      <Card
+        title="Pulse realtime"
+        subtitle={`${gauges.length} chỉ số cập nhật liên tục — fill rate, ontime, sản lượng.`}
+      >
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
+          {gauges.map((g) => (
+            <PulseGauge key={g.label} data={g} />
+          ))}
+        </div>
+      </Card>
 
       {/* === Trend 14 ngày === */}
       <Card
