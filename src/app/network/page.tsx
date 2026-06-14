@@ -5,6 +5,7 @@ import { ChevronRight, X } from "lucide-react";
 import { useFilter } from "@/components/filter/FilterContext";
 import {
   bcStateLabel,
+  getBcArrivalMatrix,
   getBcDrillByRegion,
   getBcSubMetricsByRegion,
   getKtcScorecard,
@@ -12,11 +13,10 @@ import {
   getNetworkSubMetricsByRegion,
   getLaneMatrix,
   getOverviewNorthStar,
-  getRegionBcStates,
   getRegionScorecard,
   getTerritoryMap,
 } from "@/lib/aggregators";
-import { dataUpdatedAt, getProvinces } from "@/lib/mock-data";
+import { dataUpdatedAt, getProvinces, getRegions } from "@/lib/mock-data";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { FilterBar } from "@/components/filter/FilterBar";
 import { DimensionSelect } from "@/components/filter/DimensionSelect";
@@ -56,7 +56,6 @@ export default function NetworkPage() {
 
   const northStar = useMemo(() => getOverviewNorthStar(filter), [filter]);
   const regionScorecard = useMemo(() => getRegionScorecard(filter), [filter]);
-  const bcStates = useMemo(() => getRegionBcStates(filter), [filter]);
   const ktcScorecard = useMemo(() => getKtcScorecard(filter), [filter]);
   const subMetricsByRegion = useMemo(
     () => getNetworkSubMetricsByRegion(filter),
@@ -93,6 +92,18 @@ export default function NetworkPage() {
     [filter, territoryProvince],
   );
 
+  // Số đơn về BC giao theo mốc thời gian — lọc vùng giao + vùng lấy
+  const regionOpts = useMemo(
+    () => getRegions().map((r) => ({ value: r.code, label: r.name })),
+    [],
+  );
+  const [arrVungGiao, setArrVungGiao] = useState<RegionCode | "all">("all");
+  const [arrVungLay, setArrVungLay] = useState<RegionCode | "all">("all");
+  const arrivalMatrix = useMemo(
+    () => getBcArrivalMatrix(filter, arrVungGiao, arrVungLay, 14),
+    [filter, arrVungGiao, arrVungLay],
+  );
+
   return (
     <div className="space-y-4">
       <PageHeader
@@ -124,19 +135,6 @@ export default function NetworkPage() {
         <KpiCardFrom kpi={northStar.costPerKg} size="sm" />
         <KpiCardFrom kpi={northStar.ontimeVanTai} size="sm" />
       </section>
-
-      {/* === Đếm BC theo trạng thái per vùng === */}
-      <Card
-        title="Phân bổ trạng thái BC theo vùng"
-        subtitle="Số BC ổn định / quá tải / vượt SLA / vượt cost target. Bấm vùng để xem chi tiết từng BC."
-      >
-        <DataTable
-          columns={bcStateColumns}
-          data={bcStates}
-          rowKey={(r) => r.regionCode}
-          onRowClick={(r) => setDrillRegion(r.regionCode)}
-        />
-      </Card>
 
       {/* === Scorecard 14 vùng (clickable) === */}
       <Card
@@ -177,6 +175,53 @@ export default function NetworkPage() {
         </Card>
       )}
 
+      {/* === Phân chia địa bàn BC (territory map) — ngay dưới scorecard === */}
+      <Card
+        title="Phân chia địa bàn BC"
+        subtitle="Chọn tỉnh → xem phạm vi hoạt động từng BC. Click ô để xem chi tiết: vùng, diện tích, loại kho, dịch vụ, số đơn lấy/giao, ontime lấy + giao."
+        actions={
+          <DimensionSelect
+            label="Tỉnh / Thành"
+            value={territoryProvince}
+            options={provinceOpts}
+            onChange={(v) => v && setTerritoryProvince(v)}
+            allOptionLabel="Chọn tỉnh"
+            width={200}
+            searchable
+          />
+        }
+      >
+        <LeafletTerritoryMap data={territory} />
+      </Card>
+
+      {/* === Số đơn về đến BC Giao theo từng mốc thời gian === */}
+      <Card
+        title="Số đơn về đến BC Giao theo từng mốc thời gian"
+        subtitle="Đơn về BC giao còn lại mấy ca trước hạn (1 ca ~5h). Lọc theo vùng giao + vùng lấy. Cột = ngày."
+        actions={
+          <div className="flex items-center gap-2">
+            <DimensionSelect
+              label="Vùng giao"
+              value={arrVungGiao === "all" ? undefined : arrVungGiao}
+              options={regionOpts}
+              onChange={(v) => setArrVungGiao((v as RegionCode) ?? "all")}
+              allOptionLabel="Tất cả vùng giao"
+              width={150}
+            />
+            <DimensionSelect
+              label="Vùng lấy"
+              value={arrVungLay === "all" ? undefined : arrVungLay}
+              options={regionOpts}
+              onChange={(v) => setArrVungLay((v as RegionCode) ?? "all")}
+              allOptionLabel="Tất cả vùng lấy"
+              width={150}
+            />
+          </div>
+        }
+      >
+        <ArrivalMatrixTable data={arrivalMatrix} />
+      </Card>
+
       {/* === KTC scorecard === */}
       <Card
         title={`KTC scorecard — ${ktcScorecard.length} KTC active`}
@@ -198,25 +243,6 @@ export default function NetworkPage() {
         subtitle="Hàng = KTC đi, cột = KTC đến. Toggle giữa số trip (đậm = nhiều) và ontime (đỏ = trễ) để tìm lane bận / lane nghẽn."
       >
         <OdMatrix data={laneMatrix} />
-      </Card>
-
-      {/* === Phân chia địa bàn BC (territory map) === */}
-      <Card
-        title="Phân chia địa bàn BC"
-        subtitle="Chọn tỉnh → xem phạm vi hoạt động từng BC. Hover vùng để xem đơn lấy/giao, đơn trong kho, sắp vận chuyển, ontime lấy + giao."
-        actions={
-          <DimensionSelect
-            label="Tỉnh / Thành"
-            value={territoryProvince}
-            options={provinceOpts}
-            onChange={(v) => v && setTerritoryProvince(v)}
-            allOptionLabel="Chọn tỉnh"
-            width={200}
-            searchable
-          />
-        }
-      >
-        <LeafletTerritoryMap data={territory} />
       </Card>
 
       {/* === Network sub-metrics dạng bảng theo vùng (drill BC) === */}
@@ -336,35 +362,76 @@ const bcSubMetricColumns: Column<ReturnType<typeof getBcSubMetricsByRegion>[numb
   { key: "status", label: "Trạng thái", align: "right", render: (r) => <div className="inline-flex"><StatusBadge status={r.status} /></div> },
 ];
 
-const bcStateColumns: Column<ReturnType<typeof getRegionBcStates>[number]>[] = [
-  {
-    key: "regionName",
-    label: "Vùng",
-    render: (r) => (
-      <span className="inline-flex items-center gap-1 font-medium">
-        {r.regionName}
-        <ChevronRight className="w-3 h-3 text-[var(--color-text-faint)]" />
-      </span>
-    ),
-  },
-  { key: "totalBc", label: "Tổng BC", align: "right", sortable: true, sortValue: (r) => r.totalBc, render: (r) => formatInt(r.totalBc) },
-  {
-    key: "stable", label: "Ổn định", align: "right", sortable: true, sortValue: (r) => r.stable,
-    render: (r) => <span className="text-emerald-600 font-medium">{formatInt(r.stable)}</span>,
-  },
-  {
-    key: "overload", label: "Quá tải", align: "right", sortable: true, sortValue: (r) => r.overload,
-    render: (r) => <span className={r.overload === 0 ? "text-[var(--color-text-muted)]" : "text-amber-600 font-medium"}>{formatInt(r.overload)}</span>,
-  },
-  {
-    key: "slaBreach", label: "Vượt SLA", align: "right", sortable: true, sortValue: (r) => r.slaBreach,
-    render: (r) => <span className={r.slaBreach === 0 ? "text-[var(--color-text-muted)]" : "text-amber-600 font-medium"}>{formatInt(r.slaBreach)}</span>,
-  },
-  {
-    key: "costBreach", label: "Vượt cost", align: "right", sortable: true, sortValue: (r) => r.costBreach,
-    render: (r) => <span className={r.costBreach === 0 ? "text-[var(--color-text-muted)]" : "text-red-600 font-medium"}>{formatInt(r.costBreach)}</span>,
-  },
-];
+// Bảng ma trận số đơn về BC giao theo mốc ca còn lại × ngày
+function ArrivalMatrixTable({
+  data,
+}: {
+  data: ReturnType<typeof getBcArrivalMatrix>;
+}) {
+  const fmtDay = (iso: string) => {
+    const [, m, d] = iso.split("-");
+    return `${parseInt(d, 10)}/${parseInt(m, 10)}`;
+  };
+  return (
+    <div className="overflow-x-auto border border-[var(--color-border)] rounded-md">
+      <table className="text-sm border-collapse">
+        <thead className="bg-[var(--color-table-head)]">
+          <tr>
+            <th className="sticky left-0 bg-[var(--color-table-head)] z-10 px-3 py-2 text-left text-[11px] uppercase tracking-wide text-[var(--color-text-muted)] font-medium whitespace-nowrap">
+              Thời gian còn lại
+            </th>
+            {data.days.map((d) => (
+              <th
+                key={d}
+                className="px-3 py-2 text-right text-[11px] text-[var(--color-text-muted)] font-medium whitespace-nowrap tabular-nums"
+              >
+                {fmtDay(d)}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {data.rows.map((row) => (
+            <tr key={row.key} className="border-t border-[var(--color-border-soft)]">
+              <td
+                className={cn(
+                  "sticky left-0 bg-white z-10 px-3 py-2 whitespace-nowrap",
+                  row.key === "late"
+                    ? "text-red-600 font-medium"
+                    : "text-[var(--color-text)]",
+                )}
+              >
+                {row.label}
+              </td>
+              {row.values.map((v, i) => (
+                <td
+                  key={i}
+                  className={cn(
+                    "px-3 py-2 text-right tabular-nums",
+                    row.key === "late" && v > 0 ? "text-red-600" : "text-[var(--color-text)]",
+                  )}
+                >
+                  {formatInt(v)}
+                </td>
+              ))}
+            </tr>
+          ))}
+          {/* Grand total */}
+          <tr className="border-t-2 border-[var(--color-border)] bg-[var(--color-table-head)] font-semibold">
+            <td className="sticky left-0 bg-[var(--color-table-head)] z-10 px-3 py-2 whitespace-nowrap">
+              Tổng cộng
+            </td>
+            {data.totals.map((v, i) => (
+              <td key={i} className="px-3 py-2 text-right tabular-nums">
+                {formatInt(v)}
+              </td>
+            ))}
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
 const regionColumns: Column<ReturnType<typeof getRegionScorecard>[number]>[] = [
   {

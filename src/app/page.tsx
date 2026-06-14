@@ -315,15 +315,13 @@ const channelColumns: Column<
     render: (r) => formatPct(r.pctTC, 1),
   },
   {
-    key: "fd",
-    label: "FD",
+    key: "lateSla",
+    label: "SL đơn trễ SLA Network",
     align: "right",
     sortable: true,
-    sortValue: (r) => r.fd,
+    sortValue: (r) => r.lateSla,
     render: (r) => (
-      <span className={r.fd <= 5 ? "text-emerald-600" : r.fd <= 10 ? "text-amber-600" : "text-red-600"}>
-        {formatPct(r.fd, 1)}
-      </span>
+      <span className="text-red-600 tabular-nums">{formatCompactInt(r.lateSla)}</span>
     ),
   },
   {

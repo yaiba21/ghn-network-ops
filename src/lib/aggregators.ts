@@ -946,7 +946,7 @@ export type ChannelCompareRow = {
   ontime: number;
   pctTC: number;
   doiKho: number;
-  fd: number;
+  lateSla: number; // SL đơn trễ SLA Network (đơn giao sau promised)
 };
 
 export function getChannelComparison(filter: FilterState): ChannelCompareRow[] {
@@ -963,6 +963,10 @@ export function getChannelComparison(filter: FilterState): ChannelCompareRow[] {
   return channels.map((c) => {
     const chOrders = orders.filter((o) => o.channel === c.code);
     const ids = new Set(chOrders.map((o) => o.orderId));
+    // SL đơn trễ SLA Network = đơn đã giao nhưng deliveredTs > promisedTs
+    const lateSla = chOrders.filter(
+      (o) => o.deliveredTs && o.deliveredTs > o.promisedTs,
+    ).length;
     return {
       channel: c.code,
       channelLabel: c.label,
@@ -971,7 +975,7 @@ export function getChannelComparison(filter: FilterState): ChannelCompareRow[] {
       ontime: computeOntimeNetwork(chOrders),
       pctTC: computePctTc(ids),
       doiKho: computeDoiKhoOverall(chOrders),
-      fd: computeFailedDeliveryRate(ids),
+      lateSla,
     };
   });
 }
@@ -3512,4 +3516,81 @@ export function getRoutingCargoComparison(filter: FilterState): RoutingCargoRow[
       color: d.color,
     };
   });
+}
+
+
+// =============================================================================
+// PHASE 13 — Mạng lưới: Số đơn về đến BC Giao theo từng mốc thời gian
+// (chia theo vùng giao + vùng lấy) — giống view nội bộ GHN
+// =============================================================================
+
+export type BcArrivalMatrix = {
+  days: string[];                       // cột = ngày (yyyy-MM-dd)
+  rows: { key: string; label: string; values: number[] }[]; // hàng = mốc ca còn lại
+  totals: number[];                     // grand total mỗi ngày
+};
+
+// Map BC code → region (cho vùng lấy)
+let _bcRegionMap: Map<string, RegionCode> | null = null;
+function bcRegionMap(): Map<string, RegionCode> {
+  if (!_bcRegionMap) {
+    _bcRegionMap = new Map(getBcs().map((b) => [b.code, b.regionCode]));
+  }
+  return _bcRegionMap;
+}
+
+export function getBcArrivalMatrix(
+  filter: FilterState,
+  vungGiao: RegionCode | "all",
+  vungLay: RegionCode | "all",
+  days = 14,
+): BcArrivalMatrix {
+  const bcReg = bcRegionMap();
+  const orders = filterOrders({ ...filter, regionCode: "all", provinceCode: undefined, bcCode: undefined }).filter(
+    (o) => {
+      if (!o.deliveredTs) return false;
+      if (vungGiao !== "all" && o.regionCode !== vungGiao) return false;
+      if (vungLay !== "all" && bcReg.get(o.bcLayCode) !== vungLay) return false;
+      return true;
+    },
+  );
+
+  const dayList = lastNDays(days, filter.to);
+  const dayIdx = new Map(dayList.map((d, i) => [d, i]));
+
+  // 5 mốc: trễ / còn 1 / 2 / 3 / ≥4 ca (1 ca ~ 5h)
+  const buckets = [
+    { key: "late", label: "(1) Về đến kho đã trễ" },
+    { key: "ca1", label: "(2) Còn 1 Ca" },
+    { key: "ca2", label: "(3) Còn 2 Ca" },
+    { key: "ca3", label: "(4) Còn 3 Ca" },
+    { key: "ca4", label: "(5) Còn ≥4 Ca" },
+  ];
+  const grid: Record<string, number[]> = {};
+  for (const b of buckets) grid[b.key] = new Array(dayList.length).fill(0);
+  const totals = new Array(dayList.length).fill(0);
+
+  const CA_MS = 5 * 3600 * 1000;
+  for (const o of orders) {
+    // arrival tại BC giao ≈ deliveredTs − leg last-mile (~5h)
+    const arriveMs = new Date(o.deliveredTs!).getTime() - 5 * 3600 * 1000;
+    const arriveDay = new Date(arriveMs).toISOString().slice(0, 10);
+    const col = dayIdx.get(arriveDay);
+    if (col === undefined) continue;
+    const remainMs = new Date(o.promisedTs).getTime() - arriveMs;
+    let key: string;
+    if (remainMs < 0) key = "late";
+    else {
+      const ca = Math.floor(remainMs / CA_MS) + 1;
+      key = ca >= 4 ? "ca4" : ca === 1 ? "ca1" : ca === 2 ? "ca2" : "ca3";
+    }
+    grid[key][col] += 1;
+    totals[col] += 1;
+  }
+
+  return {
+    days: dayList,
+    rows: buckets.map((b) => ({ key: b.key, label: b.label, values: grid[b.key] })),
+    totals,
+  };
 }
