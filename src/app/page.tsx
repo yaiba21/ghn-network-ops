@@ -7,9 +7,8 @@ import {
   getDailyTrend,
   getLoaiHangComparison,
   getOverviewAlerts,
+  getOverviewKeyMetrics,
   getOverviewModuleHealth,
-  getOverviewNorthStar,
-  getOverviewPulseGauges,
   getOverviewRegionHeatmap,
   getSlaComparison,
   getStageOverview,
@@ -21,7 +20,6 @@ import { AlertBanner } from "@/components/ui/AlertBanner";
 import { Card } from "@/components/ui/Card";
 import { KpiCardFrom } from "@/components/ui/KpiCard";
 import { ModuleHealthCard } from "@/components/ui/ModuleHealthCard";
-import { PulseGauge } from "@/components/ui/PulseGauge";
 import { Heatmap } from "@/components/ui/Heatmap";
 import { MetricChart } from "@/components/ui/MetricChart";
 import { DataTable, type Column } from "@/components/ui/DataTable";
@@ -38,11 +36,10 @@ import {
 export default function OverallPage() {
   const { filter } = useFilter();
 
-  const northStar = useMemo(() => getOverviewNorthStar(filter), [filter]);
+  const keyMetrics = useMemo(() => getOverviewKeyMetrics(filter), [filter]);
   const modules = useMemo(() => getOverviewModuleHealth(filter), [filter]);
   const heatmap = useMemo(() => getOverviewRegionHeatmap(filter), [filter]);
   const alerts = useMemo(() => getOverviewAlerts(filter), [filter]);
-  const gauges = useMemo(() => getOverviewPulseGauges(filter), [filter]);
   const channels = useMemo(() => getChannelComparison(filter), [filter]);
   const loaiHangs = useMemo(() => getLoaiHangComparison(filter), [filter]);
   const slas = useMemo(() => getSlaComparison(filter), [filter]);
@@ -75,32 +72,17 @@ export default function OverallPage() {
 
       {alerts.length > 0 && <AlertBanner alerts={alerts} />}
 
-      {/* === 6 thẻ North Star === */}
+      {/* === Key metrics (gom North Star + sub, cùng visualize) === */}
       <section>
         <div className="text-[11px] uppercase tracking-wide text-[var(--color-text-muted)] mb-2">
-          North Star — 6 chỉ số chiến lược toàn mạng
+          Key metrics — {keyMetrics.length} chỉ số chính toàn mạng
         </div>
-        <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
-          <KpiCardFrom kpi={northStar.ontimeNetwork} size="sm" />
-          <KpiCardFrom kpi={northStar.costPerKg} size="sm" />
-          <KpiCardFrom kpi={northStar.hangVeBc4Ca} size="sm" />
-          <KpiCardFrom kpi={northStar.fdRate} size="sm" />
-          <KpiCardFrom kpi={northStar.ontimeVanTai} size="sm" />
-          <KpiCardFrom kpi={northStar.doiKhoOverall} size="sm" />
-        </div>
-      </section>
-
-      {/* === Sub-metrics (ngay dưới North Star, không trùng) === */}
-      <Card
-        title="Chỉ số phụ (sub-metrics)"
-        subtitle={`${gauges.length} chỉ số bổ trợ — đào sâu khía cạnh khác North Star: fill rate, GTC, ontime lấy, phân tuyến, đổi kho mới, empty mileage, NDD.`}
-      >
-        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
-          {gauges.map((g) => (
-            <PulseGauge key={g.label} data={g} />
+        <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
+          {keyMetrics.map((m) => (
+            <KpiCardFrom key={m.label} kpi={m} size="sm" />
           ))}
         </div>
-      </Card>
+      </section>
 
       {/* === Module health === */}
       <section>

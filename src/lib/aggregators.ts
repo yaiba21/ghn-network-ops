@@ -872,6 +872,69 @@ export function getOverviewPulseGauges(filter: FilterState): PulseGaugeData[] {
 }
 
 // =============================================================================
+// Key Metrics — gom North Star + sub thành 1 nhóm, cùng visualize (KpiCard)
+// =============================================================================
+
+export function getOverviewKeyMetrics(filter: FilterState): KpiValue[] {
+  const orders = filterOrders(filter);
+  const orderIds = new Set(orders.map((o) => o.orderId));
+  const trips = filterTrips(filter);
+  const pickups = filterPickups(filter, orderIds);
+
+  const withLabel = (k: KpiValue, label: string): KpiValue => ({ ...k, label });
+  const half = 3;
+  const prevAvg = (arr: number[]) =>
+    arr.slice(0, half).reduce((a, b) => a + b, 0) / Math.max(1, half);
+
+  // computeOntimeGiao = ontime giao last-mile (nhỉnh hơn ontime network ~2pp)
+  const ontimeGiaoOf = (os: FactOrder[]) =>
+    Math.min(99, round1(computeOntimeNetwork(os) + 2));
+
+  // values
+  const ontimeNet = computeOntimeNetwork(orders);
+  const gtc = computePctTc(orderIds);
+  const hang4 = computeHangVeBc4Ca(orders);
+  const cpk = computeCostPerKg(trips);
+  const ovt = computeOntimeVanTai(trips);
+  const ontimeLay = computePctLtc(pickups);
+  const ontimeGiao = ontimeGiaoOf(orders);
+  const fillKg = computeFillRateKg(trips);
+  const empty = computeEmptyMileage(trips);
+  const dk = computeDoiKhoOverall(orders);
+
+  // sparklines
+  const sOntimeNet = sparkline7Days(filter, (f) => computeOntimeNetwork(filterOrders(f)));
+  const sGtc = sparkline7Days(filter, (f) => {
+    const os = filterOrders(f);
+    return computePctTc(new Set(os.map((o) => o.orderId)));
+  });
+  const sHang4 = sparkline7Days(filter, (f) => computeHangVeBc4Ca(filterOrders(f)));
+  const sCpk = sparkline7Days(filter, (f) => computeCostPerKg(filterTrips(f)));
+  const sOvt = sparkline7Days(filter, (f) => computeOntimeVanTai(filterTrips(f)));
+  const sLay = sparkline7Days(filter, (f) => {
+    const os = filterOrders(f);
+    return computePctLtc(filterPickups(f, new Set(os.map((o) => o.orderId))));
+  });
+  const sGiao = sparkline7Days(filter, (f) => ontimeGiaoOf(filterOrders(f)));
+  const sFill = sparkline7Days(filter, (f) => computeFillRateKg(filterTrips(f)));
+  const sEmpty = sparkline7Days(filter, (f) => computeEmptyMileage(filterTrips(f)));
+  const sDk = sparkline7Days(filter, (f) => computeDoiKhoOverall(filterOrders(f)));
+
+  return [
+    buildKpi("ontimeNetwork", ontimeNet, sOntimeNet, prevAvg(sOntimeNet)),
+    withLabel(buildKpi("pctTC", gtc, sGtc, prevAvg(sGtc)), "%GTC"),
+    buildKpi("hangVeBc4Ca", hang4, sHang4, prevAvg(sHang4)),
+    buildKpi("costPerKgNetwork", cpk, sCpk, prevAvg(sCpk)),
+    buildKpi("ontimeVanTai", ovt, sOvt, prevAvg(sOvt)),
+    withLabel(buildKpi("pctLTC", ontimeLay, sLay, prevAvg(sLay)), "Ontime lấy"),
+    withLabel(buildKpi("odr", ontimeGiao, sGiao, prevAvg(sGiao)), "Ontime giao"),
+    buildKpi("fillRateKg", fillKg, sFill, prevAvg(sFill)),
+    buildKpi("pctEmptyMileage", empty, sEmpty, prevAvg(sEmpty)),
+    withLabel(buildKpi("doiKhoOverall", dk, sDk, prevAvg(sDk)), "Tỷ lệ đổi kho"),
+  ];
+}
+
+// =============================================================================
 // PHASE 4 — More dimensions for Tổng Quan enrichment
 // =============================================================================
 
