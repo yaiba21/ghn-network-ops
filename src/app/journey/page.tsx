@@ -73,8 +73,8 @@ export default function JourneyPage() {
 
       {/* === Bảng 6 nhóm trạng thái + metrics === */}
       <Card
-        title={`Bảng trạng thái — ${formatCompactInt(totalOrders)} đơn qua 6 chặng`}
-        subtitle="Mỗi nhóm trạng thái: số lượng · % thành công · lead time TB · số đơn fail."
+        title="Bảng trạng thái đơn hàng"
+        subtitle={`${formatCompactInt(totalOrders)} đơn qua 6 chặng. Mỗi nhóm trạng thái: số lượng · % thành công · lead time TB · số đơn fail.`}
       >
         <StatusGroupTable groups={groups} />
       </Card>
