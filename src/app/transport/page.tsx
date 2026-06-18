@@ -135,7 +135,7 @@ export default function TransportPage() {
       {/* === Leaflet map tuyến + điểm chạm === */}
       <Card
         title="Bản đồ tuyến vận tải — KTC + điểm chạm"
-        subtitle="Bản đồ thật. KTC chấm cam (size = parcels). Hover/chọn 1 tuyến bên phải → hiện chuỗi điểm chạm (BC lấy → KTC → BC giao) với marker từng điểm."
+        subtitle="Tuyến vẽ theo đường bộ thực tế (bám đường, nằm trong đất liền). KTC chấm cam (size = parcels). Hover/chọn 1 tuyến bên phải → hiện chuỗi điểm chạm BC lấy → KTC → BC giao."
       >
         <LeafletTransportMap nodes={map.nodes} routes={map.routes} />
       </Card>

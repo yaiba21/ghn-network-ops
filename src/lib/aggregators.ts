@@ -3869,8 +3869,10 @@ export function getTripDetail(tripId: string): TripDetail | null {
       dwellMin,
       cumulativeMin: Math.round((depart - departMs) / 60000),
       status: st,
-      lat: g.lat + (jrng() - 0.5) * 0.12,
-      lng: g.lng + (jrng() - 0.5) * 0.14,
+      // Jitter nhỏ (~±1km) để các stop cùng tỉnh không chồng khít,
+      // nhưng vẫn nằm trên đất liền (không đẩy tỉnh ven biển ra khơi).
+      lat: g.lat + (jrng() - 0.5) * 0.02,
+      lng: g.lng + (jrng() - 0.5) * 0.02,
     });
     if (!isLast) {
       const legMin = Math.max(20, Math.round((totalMin - chain.length * 20) / Math.max(1, legCount)));

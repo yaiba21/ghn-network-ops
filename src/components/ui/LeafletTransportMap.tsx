@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   MapContainer,
   TileLayer,
@@ -11,6 +11,7 @@ import {
 import "leaflet/dist/leaflet.css";
 import type { MapNode, MapTripRoute } from "@/lib/aggregators";
 import { cn, formatCompactInt } from "@/lib/utils";
+import { fetchRoadPath, mapWithLimit } from "@/lib/osrm";
 
 const ROUTE_COLOR: Record<string, string> = {
   green: "#10b981",
@@ -28,8 +29,28 @@ export function LeafletTransportMap({
   height?: number;
 }) {
   const [activeTrip, setActiveTrip] = useState<string | null>(null);
+  // Hình học đường bộ (OSRM) theo tripId — fallback đường thẳng nếu chưa/không có.
+  const [roadPaths, setRoadPaths] = useState<Record<string, [number, number][]>>({});
   const center: [number, number] = [16.0, 107.5]; // giữa VN
   const maxTp = Math.max(1, ...nodes.map((n) => n.throughput));
+
+  // Tải hình học đường bộ cho từng route (bám đường, nằm trong đất liền VN).
+  useEffect(() => {
+    let cancelled = false;
+    setRoadPaths({});
+    mapWithLimit(routes, 4, async (r) => {
+      if (r.stops.length < 2) return;
+      const path = await fetchRoadPath(
+        r.stops.map((s) => ({ lat: s.lat, lng: s.lng })),
+      );
+      if (!cancelled && path) {
+        setRoadPaths((prev) => ({ ...prev, [r.tripId]: path }));
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [routes]);
 
   return (
     <div className="flex flex-col xl:flex-row gap-4">
@@ -48,11 +69,12 @@ export function LeafletTransportMap({
               attribution="&copy; OpenStreetMap"
               url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
             />
-            {/* Routes — polyline qua tất cả điểm chạm */}
+            {/* Routes — đường bộ thực tế (OSRM), fallback nối điểm chạm */}
             {routes.map((r) => {
               const dim = activeTrip && activeTrip !== r.tripId;
               const isSel = activeTrip === r.tripId;
-              const line: [number, number][] = r.stops.map((s) => [s.lat, s.lng]);
+              const line: [number, number][] =
+                roadPaths[r.tripId] ?? r.stops.map((s) => [s.lat, s.lng]);
               return (
                 <Polyline
                   key={r.tripId}

@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import {
   MapContainer,
   TileLayer,
@@ -9,6 +10,7 @@ import {
 } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import type { TripStop } from "@/lib/aggregators";
+import { fetchRoadPath } from "@/lib/osrm";
 
 const STATUS_COLOR: Record<string, string> = {
   green: "#10b981",
@@ -25,6 +27,21 @@ export function TripRouteMap({
   status: string;
   height?: number;
 }) {
+  // Hình học đường bộ thực tế (OSRM) — fallback nối thẳng các stop.
+  const [roadPath, setRoadPath] = useState<[number, number][] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setRoadPath(null);
+    if (stops.length >= 2) {
+      fetchRoadPath(stops.map((s) => ({ lat: s.lat, lng: s.lng }))).then((p) => {
+        if (!cancelled && p) setRoadPath(p);
+      });
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [stops]);
+
   if (stops.length < 1) return null;
   const lats = stops.map((s) => s.lat);
   const lngs = stops.map((s) => s.lng);
@@ -32,7 +49,7 @@ export function TripRouteMap({
     lats.reduce((a, b) => a + b, 0) / lats.length,
     lngs.reduce((a, b) => a + b, 0) / lngs.length,
   ];
-  const line: [number, number][] = stops.map((s) => [s.lat, s.lng]);
+  const line: [number, number][] = roadPath ?? stops.map((s) => [s.lat, s.lng]);
   const color = STATUS_COLOR[status] ?? "#1e3a5f";
 
   return (
@@ -50,10 +67,15 @@ export function TripRouteMap({
           attribution="&copy; OpenStreetMap"
           url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
         />
-        {/* Đường nối các điểm chạm */}
+        {/* Tuyến: đường bộ thực tế (OSRM) nếu có, không thì nối điểm chạm */}
         <Polyline
           positions={line}
-          pathOptions={{ color, weight: 3, opacity: 0.7, dashArray: "6 6" }}
+          pathOptions={{
+            color,
+            weight: 3,
+            opacity: 0.75,
+            dashArray: roadPath ? undefined : "6 6",
+          }}
         />
         {/* Marker từng điểm chạm */}
         {stops.map((s) => (
