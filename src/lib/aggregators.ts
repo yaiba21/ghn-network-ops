@@ -1619,37 +1619,58 @@ export type RoutingHeaderKpis = {
   phanTuyenDung: KpiValue;
   doiKhoOverall: KpiValue;
   doiKhoNewAddr: KpiValue;
+  chiDinhKho: KpiValue;
+  khongChiDinh: KpiValue;
   totalRevert: number;
   costImpact: number;
 };
 
+function doiKhoNewAddrRate(f: FilterState): number {
+  const na = filterOrders(f).filter((o) => o.phuongIsNew);
+  return na.length > 0
+    ? round1(pct(na.filter((o) => o.isChangedWarehouse).length, na.length))
+    : 0;
+}
+
 export function getRoutingHeaderKpis(filter: FilterState): RoutingHeaderKpis {
   const orders = filterOrders(filter);
-  const newAddr = orders.filter((o) => o.phuongIsNew);
   const dkOverall = computeDoiKhoOverall(orders);
-  const dkNew =
-    newAddr.length > 0
-      ? round1(pct(newAddr.filter((o) => o.isChangedWarehouse).length, newAddr.length))
-      : 0;
+  const dkNew = doiKhoNewAddrRate(filter);
   const ptd = round1(100 - dkOverall);
   const revertCount = orders.filter((o) => o.isChangedWarehouse).length;
 
-  const sparkPtd = sparkline7Days(filter, (f) => {
-    const sub = filterOrders(f);
-    return round1(100 - computeDoiKhoOverall(sub));
-  });
+  // % chỉ định kho = Chỉ định BC + Bộ BC; % không chỉ định = Mặc định.
+  const split = computeAssignSplit(filter);
+  const chiDinhVal = round1(split.chiDinh + split.boBc);
+  const khongVal = split.macDinh;
+
+  // WoW: tuần trước = 7 ngày trước cửa sổ 7 ngày gần nhất (kết thúc tại filter.to).
+  const d14 = lastNDays(14, filter.to);
+  const lastW: FilterState = { ...filter, from: d14[0], to: d14[6] };
+  const prevDkOverall = computeDoiKhoOverall(filterOrders(lastW));
+  const prevSplit = computeAssignSplit(lastW);
+  const prevChiDinh = round1(prevSplit.chiDinh + prevSplit.boBc);
+  const prevKhong = prevSplit.macDinh;
+  const prevPtd = round1(100 - prevDkOverall);
+  const prevDkNew = doiKhoNewAddrRate(lastW);
+
+  const sparkPtd = sparkline7Days(filter, (f) =>
+    round1(100 - computeDoiKhoOverall(filterOrders(f))),
+  );
   const sparkDk = sparkline7Days(filter, (f) => computeDoiKhoOverall(filterOrders(f)));
-  const sparkDkNew = sparkline7Days(filter, (f) => {
-    const na = filterOrders(f).filter((o) => o.phuongIsNew);
-    return na.length > 0
-      ? round1(pct(na.filter((o) => o.isChangedWarehouse).length, na.length))
-      : 0;
+  const sparkDkNew = sparkline7Days(filter, doiKhoNewAddrRate);
+  const sparkChiDinh = sparkline7Days(filter, (f) => {
+    const s = computeAssignSplit(f);
+    return round1(s.chiDinh + s.boBc);
   });
+  const sparkKhong = sparkline7Days(filter, (f) => computeAssignSplit(f).macDinh);
 
   return {
-    phanTuyenDung: buildKpi("pctPhanTuyenDung", ptd, sparkPtd),
-    doiKhoOverall: buildKpi("doiKhoOverall", dkOverall, sparkDk),
-    doiKhoNewAddr: buildKpi("doiKhoMoi", dkNew, sparkDkNew),
+    phanTuyenDung: buildKpi("pctPhanTuyenDung", ptd, sparkPtd, prevPtd),
+    doiKhoOverall: buildKpi("doiKhoOverall", dkOverall, sparkDk, prevDkOverall),
+    doiKhoNewAddr: buildKpi("doiKhoMoi", dkNew, sparkDkNew, prevDkNew),
+    chiDinhKho: buildKpi("pctChiDinhKho", chiDinhVal, sparkChiDinh, prevChiDinh),
+    khongChiDinh: buildKpi("pctKhongChiDinh", khongVal, sparkKhong, prevKhong),
     totalRevert: revertCount,
     costImpact: revertCount * 10_000,
   };
@@ -1775,6 +1796,115 @@ export function getDoiKhoBreakdown(filter: FilterState): DoiKhoBreakdown[] {
     seg("hn-new", "HN · phường mới", hn.filter((o) => o.phuongIsNew), 10, 17),
     seg("hn-old", "HN · phường cũ", hn.filter((o) => !o.phuongIsNew), 2, 4),
   ];
+}
+
+// =============================================================================
+// Routing WoW — so sánh tuần này vs tuần trước cho các key metric
+// =============================================================================
+
+export type RoutingWowRow = {
+  key: string;
+  label: string;
+  thisWeek: number;
+  lastWeek: number;
+  /** Đơn vị (%) — tất cả metric routing hiện là %. */
+  unit: "%";
+  /** true = cao hơn tốt (chỉ định kho); false = thấp hơn tốt (đổi kho, không chỉ định). */
+  higherBetter: boolean;
+};
+
+/** Cửa sổ tuần này (7 ngày gần nhất) + tuần trước (7 ngày liền trước). */
+function wowWindows(filter: FilterState): { thisW: FilterState; lastW: FilterState } {
+  const d = lastNDays(14, filter.to);
+  return {
+    lastW: { ...filter, from: d[0], to: d[6] },
+    thisW: { ...filter, from: d[7], to: d[13] },
+  };
+}
+
+export function getRoutingWowMetrics(filter: FilterState): RoutingWowRow[] {
+  const { thisW, lastW } = wowWindows(filter);
+  const chiDinhFn = (f: FilterState) => {
+    const s = computeAssignSplit(f);
+    return round1(s.chiDinh + s.boBc);
+  };
+  const khongFn = (f: FilterState) => computeAssignSplit(f).macDinh;
+  const dkFn = (f: FilterState) => round1(computeDoiKhoOverall(filterOrders(f)));
+
+  return [
+    {
+      key: "chiDinh",
+      label: "% chỉ định kho",
+      thisWeek: chiDinhFn(thisW),
+      lastWeek: chiDinhFn(lastW),
+      unit: "%",
+      higherBetter: true,
+    },
+    {
+      key: "khong",
+      label: "% không chỉ định",
+      thisWeek: khongFn(thisW),
+      lastWeek: khongFn(lastW),
+      unit: "%",
+      higherBetter: false,
+    },
+    {
+      key: "doiKho",
+      label: "% đổi kho overall",
+      thisWeek: dkFn(thisW),
+      lastWeek: dkFn(lastW),
+      unit: "%",
+      higherBetter: false,
+    },
+  ];
+}
+
+// =============================================================================
+// Tỷ lệ đổi kho toàn quốc theo nguồn đơn × phường mới/cũ (+ WoW)
+// =============================================================================
+
+export type DoiKhoAddrRow = {
+  key: string;
+  label: string;
+  newRate: number; // % đổi kho — đơn phường MỚI (tuần này)
+  newWow: number; // chênh lệch điểm % vs tuần trước
+  oldRate: number; // % đổi kho — đơn phường CŨ (tuần này)
+  oldWow: number;
+};
+
+export function getDoiKhoByChannelAddr(filter: FilterState): DoiKhoAddrRow[] {
+  const { thisW, lastW } = wowWindows(filter);
+
+  // % đổi kho trong nhóm (channel + phường mới/cũ) cho 1 cửa sổ.
+  const rateFor = (f: FilterState, channel: string, isNew: boolean): number => {
+    let pool = filterOrders(f).filter((o) => o.phuongIsNew === isNew);
+    if (channel !== "all") pool = pool.filter((o) => o.channel === channel);
+    return pool.length > 0
+      ? round1(pct(pool.filter((o) => o.isChangedWarehouse).length, pool.length))
+      : 0;
+  };
+
+  const groups: { key: string; label: string; ch: string }[] = [
+    { key: "overall", label: "Toàn quốc (overall)", ch: "all" },
+    { key: "spe", label: "SPE", ch: "spe" },
+    { key: "tts", label: "TTS", ch: "tts" },
+    { key: "sme", label: "SME", ch: "sme" },
+  ];
+
+  return groups.map((g) => {
+    const newThis = rateFor(thisW, g.ch, true);
+    const newLast = rateFor(lastW, g.ch, true);
+    const oldThis = rateFor(thisW, g.ch, false);
+    const oldLast = rateFor(lastW, g.ch, false);
+    return {
+      key: g.key,
+      label: g.label,
+      newRate: newThis,
+      newWow: round1(newThis - newLast),
+      oldRate: oldThis,
+      oldWow: round1(oldThis - oldLast),
+    };
+  });
 }
 
 // =============================================================================
@@ -3498,9 +3628,17 @@ export type EngineResolveLayer = {
  *  - Bộ BC: rơi vào rule bộ BC / polygon
  *  - Mặc định: fallback default → % cao = thiếu config BC, dễ revert sớm
  */
-export function getEngineResolveLayers(filter: FilterState): EngineResolveLayer[] {
+/**
+ * Tỷ lệ ORS phân giải đơn theo 3 layer: Chỉ định BC / Bộ BC / Mặc định.
+ * Deterministic theo filter + tỷ lệ đổi kho (đổi kho cao → mặc định cao).
+ * Dùng chung cho engine widget + KPI "% chỉ định kho" / "% không chỉ định".
+ */
+function computeAssignSplit(filter: FilterState): {
+  chiDinh: number;
+  boBc: number;
+  macDinh: number;
+} {
   const orders = filterOrders(filter);
-  // Deterministic theo filter + tỉ lệ đổi kho (đổi kho cao → mặc định cao)
   const dk = computeDoiKhoOverall(orders);
   const seed = `engine:${filter.from}:${filter.to}:${filter.regionCode ?? ""}:${filter.provinceCode ?? ""}`;
   const rng = seededRand(seed);
@@ -3511,7 +3649,11 @@ export function getEngineResolveLayers(filter: FilterState): EngineResolveLayer[
   let boBc = round1(33 + (rng() - 0.5) * 6);
   boBc = Math.max(20, Math.min(40, boBc));
   const chiDinh = round1(100 - macDinh - boBc);
+  return { chiDinh, boBc, macDinh };
+}
 
+export function getEngineResolveLayers(filter: FilterState): EngineResolveLayer[] {
+  const { chiDinh, boBc, macDinh } = computeAssignSplit(filter);
   return [
     { key: "chi-dinh", label: "Chỉ định BC", pct: chiDinh, color: "#3f8a6e" },
     { key: "bo-bc", label: "Bộ BC", pct: boBc, color: "#6dc59f" },

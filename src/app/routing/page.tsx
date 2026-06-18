@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { useFilter } from "@/components/filter/FilterContext";
 import {
   getDoiKhoBreakdown,
+  getDoiKhoByChannelAddr,
   getEngineResolveLayers,
   getRevertReasons,
   getRoutingAlerts,
@@ -11,6 +12,7 @@ import {
   getRoutingChannelFlow,
   getRoutingHeaderKpis,
   getRoutingRegionComparison,
+  getRoutingWowMetrics,
   getTopRevertBcs,
 } from "@/lib/aggregators";
 import { dataUpdatedAt } from "@/lib/mock-data";
@@ -19,6 +21,7 @@ import { FilterBar } from "@/components/filter/FilterBar";
 import { AlertBanner } from "@/components/ui/AlertBanner";
 import { Card } from "@/components/ui/Card";
 import { KpiCardFrom } from "@/components/ui/KpiCard";
+import { MetricChart } from "@/components/ui/MetricChart";
 import { Donut } from "@/components/ui/Donut";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import { MetricBadge } from "@/components/ui/MetricBadge";
@@ -40,6 +43,8 @@ export default function RoutingPage() {
   const revertReasons = useMemo(() => getRevertReasons(filter), [filter]);
   const topBcs = useMemo(() => getTopRevertBcs(filter, 20), [filter]);
   const doiKhoBreakdown = useMemo(() => getDoiKhoBreakdown(filter), [filter]);
+  const doiKhoByChannel = useMemo(() => getDoiKhoByChannelAddr(filter), [filter]);
+  const wowMetrics = useMemo(() => getRoutingWowMetrics(filter), [filter]);
   const engineLayers = useMemo(() => getEngineResolveLayers(filter), [filter]);
   const cargoRows = useMemo(() => getRoutingCargoComparison(filter), [filter]);
   const alerts = useMemo(() => getRoutingAlerts(filter), [filter]);
@@ -73,11 +78,11 @@ export default function RoutingPage() {
 
       {alerts.length > 0 && <AlertBanner alerts={alerts} />}
 
-      {/* === Header KPI === */}
+      {/* === Header KPI (key metrics) === */}
       <section className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-        <KpiCardFrom kpi={header.phanTuyenDung} size="sm" />
+        <KpiCardFrom kpi={header.chiDinhKho} size="sm" />
+        <KpiCardFrom kpi={header.khongChiDinh} size="sm" />
         <KpiCardFrom kpi={header.doiKhoOverall} size="sm" />
-        <KpiCardFrom kpi={header.doiKhoNewAddr} size="sm" />
         <div className="border border-[var(--color-border)] rounded-md bg-white p-3">
           <div className="text-[11px] uppercase tracking-wide text-[var(--color-text-muted)]">
             Tổng đơn đổi kho
@@ -100,6 +105,35 @@ export default function RoutingPage() {
         </div>
       </section>
 
+      {/* === WoW chart cho tất cả key metrics === */}
+      <Card
+        title="So sánh WoW — key metrics định tuyến"
+        subtitle="Tuần trước (7 ngày) vs Tuần này (7 ngày gần nhất). Cột càng chênh = biến động càng lớn tuần qua."
+      >
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div className="lg:col-span-2">
+            <MetricChart
+              type="bar"
+              data={wowMetrics}
+              xKey="label"
+              height={240}
+              series={[
+                { key: "lastWeek", label: "Tuần trước", color: "#CBD5E1" },
+                { key: "thisWeek", label: "Tuần này", color: "#F97316" },
+              ]}
+              yTickFormatter={(v) => `${v}%`}
+              tooltipValueFormatter={(v) => `${v.toFixed(1)}%`}
+              legend
+            />
+          </div>
+          <div className="space-y-2">
+            {wowMetrics.map((m) => (
+              <WowDeltaRow key={m.key} row={m} />
+            ))}
+          </div>
+        </div>
+      </Card>
+
       {/* === Đổi kho breakdown: overall + HCM/HN × phường mới/cũ === */}
       <Card
         title="Tỷ lệ đổi kho — breakdown từ overall"
@@ -110,6 +144,18 @@ export default function RoutingPage() {
             <DoiKhoStat key={d.key} item={d} />
           ))}
         </div>
+      </Card>
+
+      {/* === Tỷ lệ đổi kho toàn quốc theo nguồn đơn × phường (+ WoW) === */}
+      <Card
+        title="Tỷ lệ đổi kho toàn quốc — theo nguồn đơn × phường mới/cũ"
+        subtitle="Overall + SPE / TTS / SME, tách phường mới vs cũ. Cột WoW = chênh lệch điểm % tuần này vs tuần trước (↑ đỏ = xấu đi, ↓ xanh = cải thiện)."
+      >
+        <DataTable
+          columns={doiKhoAddrColumns}
+          data={doiKhoByChannel}
+          rowKey={(r) => r.key}
+        />
       </Card>
 
       {/* === Engine resolve ở bước nào + So sánh vùng === */}
@@ -308,6 +354,94 @@ function DoiKhoStat({
     </div>
   );
 }
+
+// Chênh lệch điểm % WoW (pp): màu theo hướng tốt/xấu của metric.
+function WowPP({ value, lowerBetter }: { value: number; lowerBetter?: boolean }) {
+  if (Math.abs(value) < 0.05) {
+    return <span className="text-xs tabular-nums text-[var(--color-text-muted)]">→ 0,0</span>;
+  }
+  const improving = lowerBetter ? value < 0 : value > 0;
+  const color = improving ? "text-emerald-600" : "text-red-600";
+  const arrow = value > 0 ? "▲" : "▼";
+  const sign = value > 0 ? "+" : "−";
+  return (
+    <span className={cn("text-xs font-medium tabular-nums", color)}>
+      {arrow} {sign}
+      {Math.abs(value).toFixed(1).replace(".", ",")} pp
+    </span>
+  );
+}
+
+function WowDeltaRow({
+  row,
+}: {
+  row: ReturnType<typeof getRoutingWowMetrics>[number];
+}) {
+  const delta = row.thisWeek - row.lastWeek;
+  return (
+    <div className="border border-[var(--color-border)] rounded-md p-2.5">
+      <div className="text-[11px] text-[var(--color-text-muted)] truncate">{row.label}</div>
+      <div className="mt-0.5 flex items-baseline justify-between gap-2">
+        <span className="text-lg font-semibold tabular-nums">{formatPct(row.thisWeek, 1)}</span>
+        <WowPP value={delta} lowerBetter={!row.higherBetter} />
+      </div>
+      <div className="text-[10px] text-[var(--color-text-muted)] tabular-nums">
+        tuần trước {formatPct(row.lastWeek, 1)}
+      </div>
+    </div>
+  );
+}
+
+const doiKhoRateCls = (v: number, green: number, amber: number) =>
+  v <= green ? "text-emerald-600" : v <= amber ? "text-amber-600" : "text-red-600";
+
+const doiKhoAddrColumns: Column<ReturnType<typeof getDoiKhoByChannelAddr>[number]>[] = [
+  {
+    key: "label",
+    label: "Nguồn đơn",
+    render: (r) => (
+      <span className={cn("font-medium", r.key === "overall" && "text-[var(--color-text)]")}>
+        {r.label}
+      </span>
+    ),
+  },
+  {
+    key: "newRate",
+    label: "Phường MỚI",
+    align: "right",
+    sortable: true,
+    sortValue: (r) => r.newRate,
+    render: (r) => (
+      <span className={doiKhoRateCls(r.newRate, 10, 14)}>{formatPct(r.newRate, 1)}</span>
+    ),
+  },
+  {
+    key: "newWow",
+    label: "Phường MỚI · WoW",
+    align: "right",
+    sortable: true,
+    sortValue: (r) => r.newWow,
+    render: (r) => <WowPP value={r.newWow} lowerBetter />,
+  },
+  {
+    key: "oldRate",
+    label: "Phường CŨ",
+    align: "right",
+    sortable: true,
+    sortValue: (r) => r.oldRate,
+    render: (r) => (
+      <span className={doiKhoRateCls(r.oldRate, 2, 4)}>{formatPct(r.oldRate, 1)}</span>
+    ),
+  },
+  {
+    key: "oldWow",
+    label: "Phường CŨ · WoW",
+    align: "right",
+    sortable: true,
+    sortValue: (r) => r.oldWow,
+    render: (r) => <WowPP value={r.oldWow} lowerBetter />,
+  },
+];
 
 const regionColumns: Column<ReturnType<typeof getRoutingRegionComparison>[number]>[] = [
   { key: "regionName", label: "Vùng", render: (r) => <span className="font-medium">{r.regionName}</span> },

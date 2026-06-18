@@ -763,6 +763,26 @@ export const KPI: Record<string, KpiSpec> = {
     target: 98.5,
     thresholds: [98.5, 95],
   },
+  pctChiDinhKho: {
+    // % đơn được ORS chỉ định kho (Chỉ định BC + Bộ BC). Range 80-92%.
+    key: "pctChiDinhKho",
+    label: "% đơn chỉ định kho",
+    unit: "%",
+    direction: "higher-better",
+    baseline: 88,
+    target: 92,
+    thresholds: [88, 80],
+  },
+  pctKhongChiDinh: {
+    // % đơn không có rule, rơi về Mặc định. Range 5-20%.
+    key: "pctKhongChiDinh",
+    label: "% đơn không chỉ định",
+    unit: "%",
+    direction: "lower-better",
+    baseline: 12,
+    target: 8,
+    thresholds: [10, 18],
+  },
 
   // ─── D. Last-mile / Giao hàng ─────────────────────────────────────
   opr: {
@@ -859,6 +879,10 @@ export const KPI_DEFINITION: Record<string, string> = {
     "NDD Achieve = đơn giao đúng Next-Day-Delivery / tổng đơn cam kết NDD.",
   pctPhanTuyenDung:
     "% phân tuyến đúng lần đầu ≈ 100% − tỷ lệ đổi kho. Phân tuyến sai = phải đổi kho.",
+  pctChiDinhKho:
+    "% đơn được ORS chỉ định kho rõ ràng (Chỉ định BC + Bộ BC) / tổng đơn. Cao = phân tuyến chủ động, ít rơi về mặc định.",
+  pctKhongChiDinh:
+    "% đơn không có rule chỉ định, rơi về 'Mặc định' / tổng đơn. Cao = thiếu config BC → dễ revert.",
   routingAccuracy:
     "Routing accuracy = đơn định tuyến đúng (đúng sort code + hub) / tổng đơn định tuyến.",
   misRouteRate: "% mis-route = đơn bị định tuyến sai / tổng đơn định tuyến.",
