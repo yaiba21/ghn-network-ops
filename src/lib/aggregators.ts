@@ -662,11 +662,32 @@ const HEATMAP_REGIONS: { code: RegionCode; name: string }[] = [
 export function getOverviewRegionHeatmap(filter: FilterState): HeatmapData {
   const regions = HEATMAP_REGIONS;
   const cols = [
+    "OPR",
+    "ODR",
     "Ontime Network",
-    "Cost/kg",
-    "% Giao thành công",
+    "% gán",
     "Tỷ lệ đổi kho",
+    "Cost/kg",
   ];
+
+  // status đèn cho metric không có sẵn spec (OPR/ODR)
+  const stat = (
+    v: number,
+    green: number,
+    amber: number,
+    higherBetter = true,
+  ): Status =>
+    higherBetter
+      ? v >= green
+        ? "green"
+        : v >= amber
+          ? "amber"
+          : "red"
+      : v <= green
+        ? "green"
+        : v <= amber
+          ? "amber"
+          : "red";
 
   const cells: { row: string; col: string; value: number; status: Status }[] = [];
 
@@ -675,12 +696,18 @@ export function getOverviewRegionHeatmap(filter: FilterState): HeatmapData {
     const orders = filterOrders(subFilter);
     const orderIds = new Set(orders.map((o) => o.orderId));
     const trips = filterTrips(subFilter);
+    const pickups = filterPickups(subFilter, orderIds);
+    const total = orders.length || 1;
 
+    const opr = round1(pct(orders.filter((o) => o.pickedTs).length, total));
+    const odr = round1(pct(orders.filter((o) => o.deliveredTs).length, total));
     const ontime = computeOntimeNetwork(orders);
-    const cpk = regionCostPerKg(r.code, computeCostPerKg(trips));
-    const tc = computePctTc(orderIds);
+    const gan = computePctDaGan(pickups);
     const dk = computeDoiKhoOverall(orders);
+    const cpk = regionCostPerKg(r.code, computeCostPerKg(trips));
 
+    cells.push({ row: r.name, col: "OPR", value: opr, status: stat(opr, 97, 93) });
+    cells.push({ row: r.name, col: "ODR", value: odr, status: stat(odr, 93, 88) });
     cells.push({
       row: r.name,
       col: "Ontime Network",
@@ -689,21 +716,21 @@ export function getOverviewRegionHeatmap(filter: FilterState): HeatmapData {
     });
     cells.push({
       row: r.name,
-      col: "Cost/kg",
-      value: cpk,
-      status: statusFromValue(KPI.costPerKgNetwork, cpk),
-    });
-    cells.push({
-      row: r.name,
-      col: "% Giao thành công",
-      value: tc,
-      status: statusFromValue(KPI.pctTC, tc),
+      col: "% gán",
+      value: gan,
+      status: statusFromValue(KPI.pctDaGan, gan),
     });
     cells.push({
       row: r.name,
       col: "Tỷ lệ đổi kho",
       value: dk,
       status: statusFromValue(KPI.doiKhoOverall, dk),
+    });
+    cells.push({
+      row: r.name,
+      col: "Cost/kg",
+      value: cpk,
+      status: statusFromValue(KPI.costPerKgNetwork, cpk),
     });
   }
 
