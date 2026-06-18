@@ -125,17 +125,6 @@ function computeOntimeNetwork(orders: FactOrder[]): number {
   return round1(pct(ontime.length, delivered.length));
 }
 
-function computeOtdRate(orders: FactOrder[]): number {
-  // Tính trên đơn đã có deliveredTs (gồm cả delivered + một số trạng thái khác)
-  const finished = orders.filter((o) => o.deliveredTs);
-  return round1(
-    pct(
-      finished.filter((o) => o.deliveredTs! <= o.promisedTs).length,
-      finished.length,
-    ),
-  );
-}
-
 function computeCostPerKg(trips: FactTrip[]): number {
   const totalCost = trips.reduce((a, b) => a + b.cost, 0);
   const totalWeight = trips.reduce((a, b) => a + b.weight, 0);
@@ -1921,6 +1910,14 @@ export type RegionScorecardRow = {
   hangVeBc4Ca: number;
   doiKho: number;
   status: Status;
+  // Mở rộng scorecard mạng lưới (công thức ước lượng — mock)
+  opr: number; // Order Performance Rate — đơn về đích tốt / tổng
+  odr: number; // On-time Delivery Rate — ontime trên đơn đã giao
+  ontimeTC: number; // Ontime của đơn Giao Thành Công
+  pctGan: number; // % đơn đã gán NV lấy
+  gtcPerGan: number; // %GTC tính trên đơn đã gán
+  pctLongtail: number; // % sản lượng longtail (shop nhỏ)
+  bcgLateSla: number; // % đơn về BC giao trễ/cận SLA (<1 ca buffer)
 };
 
 export function getRegionScorecard(filter: FilterState): RegionScorecardRow[] {
@@ -1930,6 +1927,7 @@ export function getRegionScorecard(filter: FilterState): RegionScorecardRow[] {
     const orders = filterOrders(sub);
     const orderIds = new Set(orders.map((o) => o.orderId));
     const trips = filterTrips(sub);
+    const pickups = filterPickups(sub, orderIds);
     const ontime = computeOntimeNetwork(orders);
     const cpk = regionCostPerKg(r.code, computeCostPerKg(trips));
     const tc = computePctTc(orderIds);
@@ -1940,6 +1938,55 @@ export function getRegionScorecard(filter: FilterState): RegionScorecardRow[] {
       statusFromValue(KPI.pctTC, tc),
       statusFromValue(KPI.hangVeBc4Ca, h4),
     );
+
+    // === Metric mở rộng ===
+    const denom = orders.length || 1;
+    const opr = round1(
+      pct(
+        orders.filter(
+          (o) =>
+            o.finalStatus === "delivered" ||
+            o.finalStatus === "returned_success" ||
+            o.finalStatus === "in_progress",
+        ).length,
+        denom,
+      ),
+    );
+    // ODR = giao trong ngày hẹn (có grace ~12h cuối ngày) — rộng hơn Ontime TC.
+    const deliveredGtc = orders.filter(
+      (o) => o.finalStatus === "delivered" && o.deliveredTs,
+    );
+    const odr =
+      deliveredGtc.length > 0
+        ? round1(
+            pct(
+              deliveredGtc.filter(
+                (o) =>
+                  new Date(o.deliveredTs!).getTime() <=
+                  new Date(o.promisedTs).getTime() + 12 * 3600 * 1000,
+              ).length,
+              deliveredGtc.length,
+            ),
+          )
+        : 0;
+    const ontimeTC = ontime; // ontime đúng mốc hẹn trên đơn GTC (= computeOntimeNetwork)
+    const pctGan = computePctDaGan(pickups);
+    const assignedIds = new Set(
+      pickups.filter((p) => p.assigned).map((p) => p.orderId),
+    );
+    const gtcPerGan = computePctTc(assignedIds);
+    const pctLongtail = round1(
+      pct(orders.filter((o) => o.shopSizeBucket === "small").length, denom),
+    );
+    // BCG trễ/cận SLA: đơn đã giao còn <1 ca (~5h) buffer so với promised (gồm cả trễ)
+    const finished = orders.filter((o) => o.deliveredTs);
+    const bcgLate = finished.filter(
+      (o) =>
+        new Date(o.promisedTs).getTime() - new Date(o.deliveredTs!).getTime() <
+        5 * 3600 * 1000,
+    ).length;
+    const bcgLateSla = round1(pct(bcgLate, finished.length || 1));
+
     return {
       regionCode: r.code,
       regionName: r.name,
@@ -1950,6 +1997,13 @@ export function getRegionScorecard(filter: FilterState): RegionScorecardRow[] {
       hangVeBc4Ca: h4,
       doiKho: dk,
       status: stat,
+      opr,
+      odr,
+      ontimeTC,
+      pctGan,
+      gtcPerGan,
+      pctLongtail,
+      bcgLateSla,
     };
   });
 }

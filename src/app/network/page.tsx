@@ -139,7 +139,12 @@ export default function NetworkPage() {
       {/* === Scorecard 14 vùng (clickable) === */}
       <Card
         title="Scorecard 14 vùng"
-        subtitle="So sánh: lượng đơn · ontime network · cost/kg · %GTC · % hàng ≥4 ca. Bấm vùng để drill xuống BC."
+        subtitle="So sánh: Volume · OPR · ODR · Ontime TC · % gán · %GTC/gán · % Longtail · % BCG trễ SLA · % on time ≥4 ca · Cost/kg. Bấm vùng để drill xuống BC."
+        actions={
+          <div className="text-[10px] uppercase tracking-wide text-[var(--color-text-muted)]">
+            Công thức ước lượng — mock data
+          </div>
+        }
       >
         <DataTable
           columns={regionColumns}
@@ -444,24 +449,43 @@ const regionColumns: Column<ReturnType<typeof getRegionScorecard>[number]>[] = [
       </span>
     ),
   },
-  { key: "totalOrders", label: "Lượng đơn", align: "right", sortable: true, sortValue: (r) => r.totalOrders, render: (r) => formatCompactInt(r.totalOrders) },
+  { key: "totalOrders", label: "Volume", align: "right", sortable: true, sortValue: (r) => r.totalOrders, render: (r) => formatCompactInt(r.totalOrders) },
   {
-    key: "ontimeNetwork", label: "Ontime Network", align: "right", sortable: true, sortValue: (r) => r.ontimeNetwork,
-    render: (r) => <span className={pctColor(r.ontimeNetwork, 90, 88)}>{formatPct(r.ontimeNetwork, 1)}</span>,
+    key: "opr", label: "OPR", align: "right", sortable: true, sortValue: (r) => r.opr,
+    render: (r) => <span className={pctColor(r.opr, 95, 92)}>{formatPct(r.opr, 1)}</span>,
+  },
+  {
+    key: "odr", label: "ODR", align: "right", sortable: true, sortValue: (r) => r.odr,
+    render: (r) => <span className={pctColor(r.odr, 92, 88)}>{formatPct(r.odr, 1)}</span>,
+  },
+  {
+    key: "ontimeTC", label: "Ontime TC", align: "right", sortable: true, sortValue: (r) => r.ontimeTC,
+    render: (r) => <span className={pctColor(r.ontimeTC, 92, 88)}>{formatPct(r.ontimeTC, 1)}</span>,
+  },
+  {
+    key: "pctGan", label: "% gán", align: "right", sortable: true, sortValue: (r) => r.pctGan,
+    render: (r) => <span className={pctColor(r.pctGan, 88, 80)}>{formatPct(r.pctGan, 1)}</span>,
+  },
+  {
+    key: "gtcPerGan", label: "%GTC/gán", align: "right", sortable: true, sortValue: (r) => r.gtcPerGan,
+    render: (r) => <span className={pctColor(r.gtcPerGan, 92, 88)}>{formatPct(r.gtcPerGan, 1)}</span>,
+  },
+  {
+    key: "pctLongtail", label: "% Longtail", align: "right", sortable: true, sortValue: (r) => r.pctLongtail,
+    render: (r) => <span className="text-[var(--color-text-muted)] tabular-nums">{formatPct(r.pctLongtail, 1)}</span>,
+  },
+  {
+    key: "bcgLateSla", label: "% BCG trễ SLA", align: "right", sortable: true, sortValue: (r) => r.bcgLateSla,
+    render: (r) => <span className={pctColor(r.bcgLateSla, 10, 20, false)}>{formatPct(r.bcgLateSla, 1)}</span>,
+  },
+  {
+    key: "hangVeBc4Ca", label: "% on time >= 4 ca", align: "right", sortable: true, sortValue: (r) => r.hangVeBc4Ca,
+    render: (r) => <span className={pctColor(r.hangVeBc4Ca, 90, 85)}>{formatPct(r.hangVeBc4Ca, 1)}</span>,
   },
   {
     key: "costPerKg", label: "Cost/kg", align: "right", sortable: true, sortValue: (r) => r.costPerKg,
     render: (r) => <span className={pctColor(r.costPerKg, 1970, 2057, false)}>{formatVND(r.costPerKg)}</span>,
   },
-  {
-    key: "pctTC", label: "%GTC", align: "right", sortable: true, sortValue: (r) => r.pctTC,
-    render: (r) => <span className={pctColor(r.pctTC, 92, 88)}>{formatPct(r.pctTC, 1)}</span>,
-  },
-  {
-    key: "hangVeBc4Ca", label: "% ≥4 ca", align: "right", sortable: true, sortValue: (r) => r.hangVeBc4Ca,
-    render: (r) => <span className={pctColor(r.hangVeBc4Ca, 90, 85)}>{formatPct(r.hangVeBc4Ca, 1)}</span>,
-  },
-  { key: "status", label: "Trạng thái", align: "right", render: (r) => <div className="inline-flex"><StatusBadge status={r.status} /></div> },
 ];
 
 const STATE_BADGE: Record<string, string> = {
