@@ -29,7 +29,7 @@ import type {
   RegionCode,
   Status,
 } from "./types";
-import { lastNDays } from "./utils";
+import { lastNDays, rangeDays } from "./utils";
 
 // =============================================================================
 // Helpers: filter từng fact table theo FilterState
@@ -2254,6 +2254,100 @@ export function getTransportByRouteType(filter: FilterState): TransportRouteType
 
 
 // =============================================================================
+// Transport: chi phí run rate vs budget theo vùng (+ drill NCC)
+// =============================================================================
+
+export type TransportRegionCostRow = {
+  regionCode: RegionCode;
+  regionName: string;
+  trips: number;
+  actualCost: number; // chi phí trong kỳ filter
+  runRate: number; // run rate / tháng (chuẩn hoá 30 ngày)
+  budget: number; // budget / tháng (mock allocation)
+  pctBudget: number; // runRate / budget × 100
+  overBudget: boolean;
+  status: Status; // green = trong budget · amber = sát · red = vượt
+};
+
+// Gán trip về vùng theo KTC (ưu tiên) hoặc điểm đi.
+function tripRegion(t: FactTrip): RegionCode {
+  return regionOfCode(t.ktcCode ?? t.originCode);
+}
+
+export function getTransportCostByRegion(
+  filter: FilterState,
+): TransportRegionCostRow[] {
+  const trips = filterTrips(filter);
+  const days = Math.max(1, rangeDays(filter.from, filter.to).length);
+  const byRegion = new Map<RegionCode, { cost: number; trips: number }>();
+  for (const t of trips) {
+    const reg = tripRegion(t);
+    const cur = byRegion.get(reg) ?? { cost: 0, trips: 0 };
+    cur.cost += t.cost;
+    cur.trips += 1;
+    byRegion.set(reg, cur);
+  }
+  return HEATMAP_REGIONS.map((r) => {
+    const agg = byRegion.get(r.code) ?? { cost: 0, trips: 0 };
+    const runRate = Math.round((agg.cost / days) * 30);
+    // Budget mock: factor = runRate/budget (0.84..1.16) → ~nửa vùng vượt budget.
+    const rng = seededRand(`budget:${r.code}`);
+    const factor = 0.84 + rng() * 0.32;
+    const budget = Math.max(1, Math.round(runRate / factor));
+    const pctBudget = round1(pct(runRate, budget));
+    const overBudget = runRate > budget;
+    const status: Status =
+      pctBudget > 100 ? "red" : pctBudget >= 95 ? "amber" : "green";
+    return {
+      regionCode: r.code,
+      regionName: r.name,
+      trips: agg.trips,
+      actualCost: Math.round(agg.cost),
+      runRate,
+      budget,
+      pctBudget,
+      overBudget,
+      status,
+    };
+  })
+    .filter((r) => r.trips > 0) // chỉ vùng có hoạt động vận tải
+    .sort((a, b) => b.runRate - a.runRate);
+}
+
+export type TransportRegionNccRow = {
+  carrier: string;
+  trips: number;
+  cost: number; // tổng chi phí NCC trong vùng (kỳ)
+  share: number; // % chi phí vùng
+  avgCost: number;
+  ontime: number;
+};
+
+export function getTransportNccByRegion(
+  filter: FilterState,
+  region: RegionCode,
+): TransportRegionNccRow[] {
+  const trips = filterTrips(filter).filter((t) => tripRegion(t) === region);
+  const totalCost = trips.reduce((a, b) => a + b.cost, 0) || 1;
+  const carriers = ["internal", "tpl-a", "tpl-b", "tpl-c"];
+  return carriers
+    .map((c) => {
+      const ts = trips.filter((t) => t.carrier === c);
+      const cost = ts.reduce((a, b) => a + b.cost, 0);
+      return {
+        carrier: c === "internal" ? "Nội bộ" : c.toUpperCase(),
+        trips: ts.length,
+        cost: Math.round(cost),
+        share: round1(pct(cost, totalCost)),
+        avgCost: ts.length > 0 ? Math.round(cost / ts.length) : 0,
+        ontime: computeOntimeVanTai(ts),
+      };
+    })
+    .filter((r) => r.trips > 0)
+    .sort((a, b) => b.cost - a.cost);
+}
+
+// =============================================================================
 // PHASE 6 — Transport: bảng sức khoẻ tuyến (lane = nhiều trip)
 // =============================================================================
 
@@ -3664,6 +3758,18 @@ export type TripDetail = {
   lateMin: number;
   status: Status;
   stops: TripStop[];
+  // Bổ sung cho trang chi tiết
+  weightKg: number;
+  fillRateKg: number;
+  fillRateOrder: number;
+  emptyKm: number;
+  emptyPct: number;
+  costPerKm: number;
+  costPerParcel: number;
+  departLateMin: number; // trễ xuất phát (actual - plan depart)
+  stopCount: number;
+  totalDwellMin: number;
+  region: string; // vùng phụ trách (theo KTC/điểm đi)
 };
 
 function ktcOrBcName(code: string): string {
@@ -3772,6 +3878,11 @@ export function getTripDetail(tripId: string): TripDetail | null {
     }
   }
 
+  const departLateMin = Math.round(
+    (new Date(t.actualDepart).getTime() - new Date(t.planDepart).getTime()) / 60000,
+  );
+  const totalDwellMin = stops.reduce((a, s) => a + s.dwellMin, 0);
+
   return {
     tripId: t.tripId,
     type: t.type.toUpperCase(),
@@ -3788,6 +3899,17 @@ export function getTripDetail(tripId: string): TripDetail | null {
     lateMin,
     status: st,
     stops,
+    weightKg: Math.round(t.weight),
+    fillRateKg: round1(t.fillRateKg * 100),
+    fillRateOrder: round1(t.fillRateOrder * 100),
+    emptyKm: Math.round(t.emptyKm),
+    emptyPct: t.totalKm > 0 ? round1(pct(t.emptyKm, t.totalKm)) : 0,
+    costPerKm: t.totalKm > 0 ? Math.round(t.cost / t.totalKm) : 0,
+    costPerParcel: t.parcels > 0 ? Math.round(t.cost / t.parcels) : 0,
+    departLateMin,
+    stopCount: stops.length,
+    totalDwellMin,
+    region: REGION_LABEL_VI[regionOfCode(t.ktcCode ?? t.originCode)],
   };
 }
 
@@ -3916,6 +4038,19 @@ function bcRegionMap(): Map<string, RegionCode> {
     _bcRegionMap = new Map(getBcs().map((b) => [b.code, b.regionCode]));
   }
   return _bcRegionMap;
+}
+
+let _ktcRegionMap: Map<string, RegionCode> | null = null;
+function ktcRegionMap(): Map<string, RegionCode> {
+  if (!_ktcRegionMap) {
+    _ktcRegionMap = new Map(getKtcs().map((k) => [k.code, k.regionCode]));
+  }
+  return _ktcRegionMap;
+}
+
+// Map 1 BC/KTC code → vùng. Fallback HNO nếu không tìm thấy.
+function regionOfCode(code: string): RegionCode {
+  return bcRegionMap().get(code) ?? ktcRegionMap().get(code) ?? "HNO";
 }
 
 export function getBcArrivalMatrix(

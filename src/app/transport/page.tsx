@@ -9,8 +9,10 @@ import {
   getTransportAlerts,
   getTransportByCarrier,
   getTransportByRouteType,
+  getTransportCostByRegion,
   getTransportKpis,
   getTransportMap,
+  getTransportNccByRegion,
   getTransportTrips,
   getTripDetail,
 } from "@/lib/aggregators";
@@ -25,7 +27,10 @@ import { DimensionSelect } from "@/components/filter/DimensionSelect";
 import { Card } from "@/components/ui/Card";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import { StatusBadge } from "@/components/ui/StatusBadge";
+import { StatusDot } from "@/components/ui/StatusDot";
 import { KpiCard } from "@/components/ui/KpiCard";
+import { X } from "lucide-react";
+import { REGION_LABEL_VI, type RegionCode } from "@/lib/types";
 
 // Leaflet cần window → client-only
 const LeafletTransportMap = dynamic(
@@ -37,6 +42,7 @@ const TripRouteMap = dynamic(
   { ssr: false, loading: () => <div className="h-[300px] ghn-skeleton rounded-md" /> },
 );
 import {
+  cn,
   formatCompactInt,
   formatHours,
   formatInt,
@@ -55,6 +61,7 @@ export default function TransportPage() {
   const laneOpts = useMemo(() => getLaneCodesForFilter(filter), [filter]);
   const map = useMemo(() => getTransportMap(filter, 14), [filter]);
   const alerts = useMemo(() => getTransportAlerts(filter), [filter]);
+  const regionCost = useMemo(() => getTransportCostByRegion(filter), [filter]);
   const updated = dataUpdatedAt();
 
   // Trip được chọn → xem các điểm chạm
@@ -62,6 +69,13 @@ export default function TransportPage() {
   const tripDetail = useMemo(
     () => (selectedTrip ? getTripDetail(selectedTrip) : null),
     [selectedTrip],
+  );
+
+  // Vùng được chọn → drill NCC + chi phí
+  const [costRegion, setCostRegion] = useState<RegionCode | null>(null);
+  const nccByRegion = useMemo(
+    () => (costRegion ? getTransportNccByRegion(filter, costRegion) : []),
+    [filter, costRegion],
   );
 
   return (
@@ -158,21 +172,57 @@ export default function TransportPage() {
         />
       </Card>
 
-      {/* === Trip detail popup (modal) === */}
+      {/* === Trip detail popup (modal) — trang chi tiết đầy đủ === */}
       <Modal
         open={!!tripDetail}
         onClose={() => setSelectedTrip(null)}
-        title={tripDetail ? `Hành trình chuyến ${tripDetail.tripId}` : ""}
-        subtitle="Chuỗi điểm chạm theo thứ tự (BC lấy → KTC → KTC → BC giao). Bản đồ + timeline giờ đến/rời, thời gian dừng, tổng thời lượng tích luỹ."
+        title={tripDetail ? `Chi tiết chuyến ${tripDetail.tripId}` : ""}
+        subtitle="Tổng quan chuyến · chi phí · tải trọng · kế hoạch vs thực tế · chuỗi điểm chạm (bản đồ + timeline)."
         widthClass="max-w-5xl"
       >
-        {tripDetail && (
-          <div className="space-y-4">
-            <TripRouteMap stops={tripDetail.stops} status={tripDetail.status} height={280} />
-            <TripTimeline detail={tripDetail} />
-          </div>
-        )}
+        {tripDetail && <TripDetailView detail={tripDetail} />}
       </Modal>
+
+      {/* === Chi phí run rate vs budget theo vùng (+ drill NCC) === */}
+      <Card
+        title="Chi phí vận tải theo vùng — run rate vs budget"
+        subtitle="Run rate = chi phí kỳ quy đổi/tháng. So với budget tháng; vượt budget = cảnh báo đỏ. Bấm 1 vùng để drill xuống NCC + chi phí trong vùng."
+        actions={
+          <div className="text-[10px] uppercase tracking-wide text-[var(--color-text-muted)]">
+            Budget mock — chờ data thật
+          </div>
+        }
+      >
+        <DataTable
+          columns={regionCostColumns}
+          data={regionCost}
+          rowKey={(r) => r.regionCode}
+          onRowClick={(r) => setCostRegion(r.regionCode)}
+        />
+      </Card>
+
+      {/* === Drill NCC trong vùng === */}
+      {costRegion && (
+        <Card
+          title={`NCC trong vùng ${REGION_LABEL_VI[costRegion]} — chi phí`}
+          subtitle={`${nccByRegion.length} NCC hoạt động, sort theo chi phí. Share = % chi phí vùng.`}
+          actions={
+            <button
+              type="button"
+              onClick={() => setCostRegion(null)}
+              className="inline-flex items-center gap-1 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+            >
+              <X className="w-3.5 h-3.5" /> Đóng
+            </button>
+          }
+        >
+          <DataTable
+            columns={regionNccColumns}
+            data={nccByRegion}
+            rowKey={(r) => r.carrier}
+          />
+        </Card>
+      )}
 
       {/* === Carriers + Route types === */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
@@ -186,6 +236,161 @@ export default function TransportPage() {
     </div>
   );
 }
+
+// =============================================================================
+// Trang chi tiết chuyến (rich)
+// =============================================================================
+
+function MiniStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="border border-[var(--color-border)] rounded-md p-2 bg-white">
+      <div className="text-[10px] uppercase tracking-wide text-[var(--color-text-muted)] truncate">
+        {label}
+      </div>
+      <div className="text-sm font-semibold tabular-nums text-[var(--color-text)] mt-0.5">
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function PlanActual({
+  label,
+  plan,
+  actual,
+  lateMin,
+}: {
+  label: string;
+  plan: string;
+  actual: string;
+  lateMin: number;
+}) {
+  const fmt = (iso: string) =>
+    `${formatVNDate(iso.slice(0, 10))} ${iso.slice(11, 16)}`;
+  const tone =
+    lateMin <= 15 ? "text-emerald-600" : lateMin <= 60 ? "text-amber-600" : "text-red-600";
+  const lateLabel =
+    lateMin < 0
+      ? `Sớm ${Math.abs(lateMin)}'`
+      : lateMin <= 15
+        ? `Đúng giờ (+${lateMin}')`
+        : `Trễ ${lateMin}'`;
+  return (
+    <div className="border border-[var(--color-border)] rounded-md p-3">
+      <div className="text-[11px] uppercase tracking-wide text-[var(--color-text-muted)] mb-1.5">
+        {label}
+      </div>
+      <div className="grid grid-cols-2 gap-2 text-xs">
+        <div>
+          <div className="text-[10px] text-[var(--color-text-muted)]">Kế hoạch</div>
+          <div className="font-medium tabular-nums">{fmt(plan)}</div>
+        </div>
+        <div>
+          <div className="text-[10px] text-[var(--color-text-muted)]">Thực tế</div>
+          <div className="font-medium tabular-nums">{fmt(actual)}</div>
+        </div>
+      </div>
+      <div className={cn("mt-1.5 text-xs font-medium", tone)}>{lateLabel}</div>
+    </div>
+  );
+}
+
+function TripDetailView({
+  detail,
+}: {
+  detail: NonNullable<ReturnType<typeof getTripDetail>>;
+}) {
+  const d = detail;
+  return (
+    <div className="space-y-4">
+      {/* Badges + trạng thái */}
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-mono px-2 py-0.5 bg-[var(--color-hover)] rounded">{d.type}</span>
+        <span className="text-xs px-2 py-0.5 bg-[var(--color-hover)] rounded">NCC: {d.carrier}</span>
+        <span className="text-xs px-2 py-0.5 bg-[var(--color-hover)] rounded">Xe: {d.vehicle}</span>
+        <span className="text-xs px-2 py-0.5 bg-[var(--color-hover)] rounded">Vùng: {d.region}</span>
+        <span className="ml-auto inline-flex items-center gap-1.5 text-xs font-medium">
+          <StatusDot status={d.status} />
+          {d.lateMin <= 15 ? "Đến đúng giờ" : `Đến trễ ${d.lateMin}'`}
+        </span>
+      </div>
+
+      {/* KPI strip */}
+      <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-2">
+        <MiniStat label="Parcels" value={formatCompactInt(d.parcels)} />
+        <MiniStat label="Khối lượng" value={`${formatCompactInt(d.weightKg)} kg`} />
+        <MiniStat label="Tổng km" value={`${formatInt(d.totalKm)} km`} />
+        <MiniStat label="Chi phí" value={formatVND(d.cost, true)} />
+        <MiniStat label="Cost/km" value={formatVND(d.costPerKm)} />
+        <MiniStat label="Cost/parcel" value={formatVND(d.costPerParcel)} />
+        <MiniStat label="Fill kg" value={formatPct(d.fillRateKg, 1)} />
+        <MiniStat label="Fill đơn" value={formatPct(d.fillRateOrder, 1)} />
+        <MiniStat label="Empty" value={`${formatInt(d.emptyKm)}km · ${formatPct(d.emptyPct, 0)}`} />
+        <MiniStat label="Điểm chạm" value={`${d.stopCount}`} />
+        <MiniStat label="Tổng dừng" value={formatHours(d.totalDwellMin / 60)} />
+        <MiniStat label="Thời lượng" value={formatHours(d.totalDurationMin / 60)} />
+      </div>
+
+      {/* Kế hoạch vs thực tế */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <PlanActual label="Xuất phát" plan={d.planDepart} actual={d.actualDepart} lateMin={d.departLateMin} />
+        <PlanActual label="Đến nơi" plan={d.planArrive} actual={d.actualArrive} lateMin={d.lateMin} />
+      </div>
+
+      {/* Bản đồ + timeline điểm chạm */}
+      <TripRouteMap stops={d.stops} status={d.status} height={280} />
+      <TripTimeline detail={d} />
+    </div>
+  );
+}
+
+const regionCostColumns: Column<ReturnType<typeof getTransportCostByRegion>[number]>[] = [
+  {
+    key: "regionName",
+    label: "Vùng",
+    render: (r) => <span className="font-medium">{r.regionName}</span>,
+  },
+  { key: "trips", label: "Số trip", align: "right", sortable: true, sortValue: (r) => r.trips, render: (r) => formatCompactInt(r.trips) },
+  { key: "actualCost", label: "Chi phí kỳ", align: "right", sortable: true, sortValue: (r) => r.actualCost, render: (r) => formatVND(r.actualCost, true) },
+  { key: "runRate", label: "Run rate / tháng", align: "right", sortable: true, sortValue: (r) => r.runRate, render: (r) => <span className="font-semibold tabular-nums">{formatVND(r.runRate, true)}</span> },
+  { key: "budget", label: "Budget / tháng", align: "right", sortable: true, sortValue: (r) => r.budget, render: (r) => <span className="text-[var(--color-text-muted)]">{formatVND(r.budget, true)}</span> },
+  {
+    key: "pctBudget", label: "% so budget", align: "right", sortable: true, sortValue: (r) => r.pctBudget,
+    render: (r) => (
+      <span className={r.pctBudget > 100 ? "text-red-600 font-semibold" : r.pctBudget >= 95 ? "text-amber-600" : "text-emerald-600"}>
+        {formatPct(r.pctBudget, 1)}
+      </span>
+    ),
+  },
+  {
+    key: "overBudget", label: "Cảnh báo", align: "right",
+    render: (r) =>
+      r.overBudget ? (
+        <span className="inline-block px-2 py-0.5 text-xs font-medium border rounded bg-red-100 text-red-800 border-red-200">
+          Vượt budget +{formatVND(r.runRate - r.budget, true)}
+        </span>
+      ) : (
+        <span className="inline-block px-2 py-0.5 text-xs font-medium border rounded bg-emerald-100 text-emerald-800 border-emerald-200">
+          Trong budget
+        </span>
+      ),
+  },
+];
+
+const regionNccColumns: Column<ReturnType<typeof getTransportNccByRegion>[number]>[] = [
+  { key: "carrier", label: "NCC", render: (r) => <span className="font-medium">{r.carrier}</span> },
+  { key: "trips", label: "Chuyến", align: "right", sortable: true, sortValue: (r) => r.trips, render: (r) => formatCompactInt(r.trips) },
+  { key: "cost", label: "Chi phí", align: "right", sortable: true, sortValue: (r) => r.cost, render: (r) => <span className="font-semibold tabular-nums">{formatVND(r.cost, true)}</span> },
+  {
+    key: "share", label: "Share vùng", align: "right", sortable: true, sortValue: (r) => r.share,
+    render: (r) => formatPct(r.share, 1),
+  },
+  { key: "avgCost", label: "Cost TB/chuyến", align: "right", sortable: true, sortValue: (r) => r.avgCost, render: (r) => formatVND(r.avgCost) },
+  {
+    key: "ontime", label: "Ontime", align: "right", sortable: true, sortValue: (r) => r.ontime,
+    render: (r) => <span className={r.ontime >= 95 ? "text-emerald-600" : r.ontime >= 93 ? "text-amber-600" : "text-red-600"}>{formatPct(r.ontime, 1)}</span>,
+  },
+];
 
 const laneColumns: Column<ReturnType<typeof getLaneHealth>[number]>[] = [
   { key: "origin", label: "Điểm đi", render: (r) => <span className="font-mono text-xs">{r.origin}</span> },
