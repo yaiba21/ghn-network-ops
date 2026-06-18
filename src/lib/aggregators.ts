@@ -35,6 +35,7 @@ import type {
   Status,
 } from "./types";
 import { lastNDays, rangeDays } from "./utils";
+import { CHANNEL_LABEL_VI, LOAI_HANG_LABEL_VI } from "./types";
 
 // =============================================================================
 // Helpers: filter từng fact table theo FilterState
@@ -2185,15 +2186,8 @@ export function getNetworkKeyMetrics(filter: FilterState): KpiValue[] {
   ];
 }
 
-/**
- * Giá trị hiện tại của 1 metric theo phạm vi (cho trang Quản lý mục tiêu).
- * Cửa sổ mặc định = 30 ngày gần nhất. Metric trip-based chưa scope theo vùng/BC.
- */
-export function computeMetricValue(
-  metricKey: string,
-  scopeLevel: string,
-  scopeValue: string,
-): number {
+/** Gắn dimension phạm vi vào filter. */
+function scopeBaseFilter(scopeLevel: string, scopeValue: string): FilterState {
   const f: FilterState = { ...defaultFilter() };
   if (scopeValue) {
     if (scopeLevel === "region") f.regionCode = scopeValue as RegionCode;
@@ -2202,6 +2196,11 @@ export function computeMetricValue(
     else if (scopeLevel === "ktc") f.ktcCode = scopeValue;
     else if (scopeLevel === "bc") f.bcCode = scopeValue;
   }
+  return f;
+}
+
+/** Tính 1 metric từ 1 filter cụ thể (kèm cửa sổ ngày). */
+function metricForFilter(metricKey: string, f: FilterState): number {
   const orders = filterOrders(f);
   const orderIds = new Set(orders.map((o) => o.orderId));
   const trips = filterTrips(f);
@@ -2236,6 +2235,85 @@ export function computeMetricValue(
     default:
       return 0;
   }
+}
+
+/**
+ * Giá trị hiện tại của 1 metric theo phạm vi (cho trang Quản lý mục tiêu).
+ * Cửa sổ mặc định = 30 ngày gần nhất.
+ */
+export function computeMetricValue(
+  metricKey: string,
+  scopeLevel: string,
+  scopeValue: string,
+): number {
+  return metricForFilter(metricKey, scopeBaseFilter(scopeLevel, scopeValue));
+}
+
+export type MetricBreakdownRow = {
+  scopeValue: string;
+  label: string;
+  current: number; // 15 ngày gần nhất
+  prev: number; // 15 ngày trước đó (historical so sánh)
+  sparkline: number[]; // 6 mốc (mỗi ~5 ngày) — trend lịch sử
+};
+
+/**
+ * Breakdown 1 metric theo cấp phạm vi (vùng/channel/loại hàng/KTC/BC),
+ * kèm số historical (kỳ trước + sparkline trend) để admin so sánh đặt target.
+ */
+export function getMetricBreakdown(
+  metricKey: string,
+  scopeLevel: string,
+): MetricBreakdownRow[] {
+  // Danh sách scope value theo cấp
+  let entries: { value: string; label: string }[] = [];
+  if (scopeLevel === "all") {
+    entries = [{ value: "", label: "Toàn mạng" }];
+  } else if (scopeLevel === "region") {
+    entries = HEATMAP_REGIONS.map((r) => ({ value: r.code, label: r.name }));
+  } else if (scopeLevel === "channel") {
+    entries = (["tts", "spe", "sme", "ka", "b2b", "cb"] as ChannelCode[]).map((c) => ({
+      value: c,
+      label: CHANNEL_LABEL_VI[c],
+    }));
+  } else if (scopeLevel === "loaiHang") {
+    entries = (["tieu-chuan", "cong-kenh", "nang"] as LoaiHang[]).map((c) => ({
+      value: c,
+      label: LOAI_HANG_LABEL_VI[c],
+    }));
+  } else if (scopeLevel === "ktc") {
+    entries = getKtcs().map((k) => ({ value: k.code, label: k.name }));
+  } else if (scopeLevel === "bc") {
+    // Top 40 BC theo sản lượng giao
+    const cnt = new Map<string, number>();
+    for (const o of getFactOrders()) cnt.set(o.bcGiaoCode, (cnt.get(o.bcGiaoCode) ?? 0) + 1);
+    const top = [...cnt.entries()].sort((a, b) => b[1] - a[1]).slice(0, 40);
+    const bcName = new Map(getBcs().map((b) => [b.code, b.name]));
+    entries = top.map(([code]) => ({ value: code, label: bcName.get(code) ?? code }));
+  }
+
+  const base = defaultFilter();
+  const d = lastNDays(30, base.to);
+  const curWin: [string, string] = [d[15], d[29]];
+  const prevWin: [string, string] = [d[0], d[14]];
+  const buckets: [number, number][] = [
+    [0, 4],
+    [5, 9],
+    [10, 14],
+    [15, 19],
+    [20, 24],
+    [25, 29],
+  ];
+
+  return entries.map((e) => {
+    const sf = scopeBaseFilter(scopeLevel, e.value);
+    const current = metricForFilter(metricKey, { ...sf, from: curWin[0], to: curWin[1] });
+    const prev = metricForFilter(metricKey, { ...sf, from: prevWin[0], to: prevWin[1] });
+    const sparkline = buckets.map(([a, b]) =>
+      metricForFilter(metricKey, { ...sf, from: d[a], to: d[b] }),
+    );
+    return { scopeValue: e.value, label: e.label, current, prev, sparkline };
+  });
 }
 
 export function getRegionScorecard(filter: FilterState): RegionScorecardRow[] {
