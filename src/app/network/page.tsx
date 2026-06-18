@@ -180,10 +180,10 @@ export default function NetworkPage() {
         </Card>
       )}
 
-      {/* === Phân chia địa bàn BC (territory map) — ngay dưới scorecard === */}
+      {/* === Phân chia phạm vi BC (territory map) — ngay dưới scorecard === */}
       <Card
-        title="Phân chia địa bàn BC"
-        subtitle="Chọn tỉnh → xem phạm vi hoạt động từng BC. Click ô để xem chi tiết: vùng, diện tích, loại kho, dịch vụ, số đơn lấy/giao, ontime lấy + giao."
+        title="Phân chia phạm vi BC"
+        subtitle="Heatmap mức cần chú ý từng BC (đỏ = cần xử lý). Chọn tỉnh → click ô để xem: loại kho, loại hình, tồn kho (quá tải?), %LTC / %GTC / đổi kho kèm WoW."
         actions={
           <DimensionSelect
             label="Tỉnh / Thành"

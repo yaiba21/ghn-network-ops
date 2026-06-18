@@ -3224,18 +3224,26 @@ export type TerritoryBc = {
   regionName: string;
   ktcCode: string;          // kho trực thuộc
   areaKm2: number;          // diện tích hoạt động
-  loaiKho: string;          // loại kho
-  loaiHoatDong: string;     // Lấy / Trả / Hỗn hợp
-  loaiDichVu: string;       // Thường / B2B / KHL / Ahamove
-  loaiHangBc: string;       // Tiêu chuẩn / Cồng kềnh / Nặng
+  loaiKho: string;          // BC thường / Kho CK / Kho GXT / Kho B2B
+  loaiHoatDong: string;     // Hỗn hợp / Chuyên lấy / Chuyên giao
+  loaiDichVu: string;       // (giữ trong data, không hiển thị)
+  loaiHangBc: string;       // (giữ trong data, không hiển thị)
   // Số liệu
   donLay: number;
   donGiao: number;
   donTrongKho: number;
   donSapVc: number;
-  ontimeLay: number;
+  khoLoadPct: number;       // % tồn kho so với sản lượng giao
+  khoOverload: boolean;     // đang quá tải?
+  ontimeLay: number;        // = %LTC
   ontimeGiao: number;
-  status: Status;
+  pctGtc: number;           // %GTC tại BC giao
+  doiKho: number;           // tỷ lệ đổi kho
+  // WoW (chênh điểm % tuần này vs tuần trước)
+  ltcWow: number;
+  gtcWow: number;
+  doiKhoWow: number;
+  status: Status;           // attention: red = cần xử lý, amber = theo dõi, green = ổn
 };
 
 export type TerritoryMapData = {
@@ -3302,15 +3310,29 @@ export function getTerritoryMap(
   const layCount = new Map<string, number>();
   const giaoCount = new Map<string, number>();
   const giaoOntime = new Map<string, number>();
+  const gtcNum = new Map<string, number>(); // đơn delivered (GTC)
+  const gtcDen = new Map<string, number>(); // đơn đến quyết định giao
+  const doiKhoNum = new Map<string, number>(); // đơn đổi kho tại BC giao
   for (const o of orders) {
     if (bcCodeSet.has(o.bcLayCode)) {
       layCount.set(o.bcLayCode, (layCount.get(o.bcLayCode) ?? 0) + 1);
     }
     if (bcCodeSet.has(o.bcGiaoCode)) {
-      giaoCount.set(o.bcGiaoCode, (giaoCount.get(o.bcGiaoCode) ?? 0) + 1);
+      const g = o.bcGiaoCode;
+      giaoCount.set(g, (giaoCount.get(g) ?? 0) + 1);
       if (o.deliveredTs && o.deliveredTs <= o.promisedTs) {
-        giaoOntime.set(o.bcGiaoCode, (giaoOntime.get(o.bcGiaoCode) ?? 0) + 1);
+        giaoOntime.set(g, (giaoOntime.get(g) ?? 0) + 1);
       }
+      if (
+        o.finalStatus === "delivered" ||
+        o.finalStatus === "delivery_failed" ||
+        o.finalStatus === "returned_success" ||
+        o.finalStatus === "returned_failed"
+      ) {
+        gtcDen.set(g, (gtcDen.get(g) ?? 0) + 1);
+        if (o.finalStatus === "delivered") gtcNum.set(g, (gtcNum.get(g) ?? 0) + 1);
+      }
+      if (o.isChangedWarehouse) doiKhoNum.set(g, (doiKhoNum.get(g) ?? 0) + 1);
     }
   }
 
@@ -3322,6 +3344,56 @@ export function getTerritoryMap(
     layTotal.set(p.bcCode, (layTotal.get(p.bcCode) ?? 0) + 1);
     if (p.ltc) layOntime.set(p.bcCode, (layOntime.get(p.bcCode) ?? 0) + 1);
   }
+
+  // === WoW: tính %LTC / %GTC / đổi kho per-BC cho 1 cửa sổ ngày ===
+  const windowRates = (from: string, to: string) => {
+    const wOrders = filterOrders({
+      ...filter,
+      from,
+      to,
+      provinceCode: undefined,
+      bcCode: undefined,
+    });
+    const gN = new Map<string, number>();
+    const gD = new Map<string, number>();
+    const dk = new Map<string, number>();
+    const gTot = new Map<string, number>();
+    const ids = new Set<string>();
+    for (const o of wOrders) {
+      ids.add(o.orderId);
+      if (!bcCodeSet.has(o.bcGiaoCode)) continue;
+      const g = o.bcGiaoCode;
+      gTot.set(g, (gTot.get(g) ?? 0) + 1);
+      if (
+        o.finalStatus === "delivered" ||
+        o.finalStatus === "delivery_failed" ||
+        o.finalStatus === "returned_success" ||
+        o.finalStatus === "returned_failed"
+      ) {
+        gD.set(g, (gD.get(g) ?? 0) + 1);
+        if (o.finalStatus === "delivered") gN.set(g, (gN.get(g) ?? 0) + 1);
+      }
+      if (o.isChangedWarehouse) dk.set(g, (dk.get(g) ?? 0) + 1);
+    }
+    const lT = new Map<string, number>();
+    const lO = new Map<string, number>();
+    for (const p of pickups) {
+      if (!bcCodeSet.has(p.bcCode) || !ids.has(p.orderId)) continue;
+      lT.set(p.bcCode, (lT.get(p.bcCode) ?? 0) + 1);
+      if (p.ltc) lO.set(p.bcCode, (lO.get(p.bcCode) ?? 0) + 1);
+    }
+    return (code: string) => ({
+      ltc: (lT.get(code) ?? 0) > 0 ? pct(lO.get(code) ?? 0, lT.get(code)!) : 0,
+      gtc: (gD.get(code) ?? 0) > 0 ? pct(gN.get(code) ?? 0, gD.get(code)!) : 0,
+      doiKho: (gTot.get(code) ?? 0) > 0 ? pct(dk.get(code) ?? 0, gTot.get(code)!) : 0,
+      ltcN: lT.get(code) ?? 0,
+      gtcN: gD.get(code) ?? 0,
+      giaoN: gTot.get(code) ?? 0,
+    });
+  };
+  const d14 = lastNDays(14, filter.to);
+  const ratesLastW = windowRates(d14[0], d14[6]);
+  const ratesThisW = windowRates(d14[7], d14[13]);
 
   const n = bcsInProvince.length || 1;
   const cols = Math.ceil(Math.sqrt(n * 1.4));
@@ -3336,8 +3408,8 @@ export function getTerritoryMap(
 
   const LOAI_HD: Record<string, string> = {
     lay: "Chuyên lấy",
-    tra: "Chuyên trả",
-    "hon-hop": "Hỗn hợp (lấy + giao + trả)",
+    tra: "Chuyên giao",
+    "hon-hop": "Hỗn hợp",
   };
   const LOAI_DV: Record<string, string> = {
     thuong: "Thường",
@@ -3351,6 +3423,7 @@ export function getTerritoryMap(
     nang: "Nặng",
   };
 
+  const scoreArr: number[] = []; // attention score per BC (theo thứ tự map)
   const bcs: TerritoryBc[] = bcsInProvince.map((b, i) => {
     const rng = seededRand(b.code);
     const col = i % cols;
@@ -3366,25 +3439,62 @@ export function getTerritoryMap(
     const ltTot = layTotal.get(b.code) ?? 0;
     const ontimeLay = ltTot > 0 ? round1(pct(layOntime.get(b.code) ?? 0, ltTot)) : 0;
     const ontimeGiao = donGiao > 0 ? round1(pct(giaoOntime.get(b.code) ?? 0, donGiao)) : 0;
+    const pctGtc =
+      (gtcDen.get(b.code) ?? 0) > 0
+        ? round1(pct(gtcNum.get(b.code) ?? 0, gtcDen.get(b.code)!))
+        : 0;
+    const doiKho = donGiao > 0 ? round1(pct(doiKhoNum.get(b.code) ?? 0, donGiao)) : 0;
+
+    // Tồn kho / quá tải: % đơn còn trong kho so với sản lượng giao
+    const khoLoadPct = donGiao > 0 ? round1(pct(donTrongKho, donGiao)) : 0;
+    const khoOverload = donGiao > 0 && khoLoadPct > 14;
+
+    // WoW deltas (điểm %) — chỉ tính khi cả 2 tuần đủ mẫu, tránh nhiễu BC nhỏ.
+    const tw = ratesThisW(b.code);
+    const lw = ratesLastW(b.code);
+    const MIN_WOW = 5;
+    const ltcWow =
+      tw.ltcN >= MIN_WOW && lw.ltcN >= MIN_WOW ? round1(tw.ltc - lw.ltc) : 0;
+    const gtcWow =
+      tw.gtcN >= MIN_WOW && lw.gtcN >= MIN_WOW ? round1(tw.gtc - lw.gtc) : 0;
+    const doiKhoWow =
+      tw.giaoN >= MIN_WOW && lw.giaoN >= MIN_WOW
+        ? round1(tw.doiKho - lw.doiKho)
+        : 0;
 
     totalLay += donLay;
     totalGiao += donGiao;
     totalKho += donTrongKho;
     totalSapVc += donSapVc;
 
-    const status = worstStatus(
-      ontimeGiao >= 90 ? "green" : ontimeGiao >= 85 ? "amber" : "red",
-      ontimeLay >= 90 ? "green" : ontimeLay >= 85 ? "amber" : "red",
-    );
+    // Attention score (cao = càng cần chú ý) — xếp hạng tương đối ở bước sau.
+    // Chỉ chấm điểm BC đủ volume; BC quá ít đơn coi như không có tín hiệu.
+    const attnScore =
+      donGiao >= 8
+        ? (100 - ontimeGiao) * 1.0 +
+          (100 - pctGtc) * 1.2 +
+          (100 - ontimeLay) * 0.6 +
+          doiKho * 2.0 +
+          khoLoadPct * 1.0 +
+          (khoOverload ? 15 : 0)
+        : -1; // -1 = không xét
+    scoreArr.push(attnScore);
+    const status: Status = "green"; // gán lại theo rank sau map
 
     // GPS thật: scatter quanh centroid tỉnh (±0.12 độ ~ ±13km)
     const lat = centroid.lat + (rng() - 0.5) * 0.24;
     const lng = centroid.lng + (rng() - 0.5) * 0.28;
     const areaKm2 = Math.round(8 + rng() * 52);
     const coverageKm = round1(Math.sqrt(areaKm2 / Math.PI)); // bán kính tương đương
-    // Loại kho: theo sản lượng giao
+    // Loại kho: B2B → Kho B2B; sản lượng cao → Kho CK; vừa → Kho GXT; còn lại → BC thường
     const loaiKho =
-      donGiao > 600 ? "Kho lớn (hub vùng)" : donGiao > 250 ? "Kho thường" : "Kho vệ tinh";
+      b.loaiDichVu === "b2b"
+        ? "Kho B2B"
+        : donGiao > 600
+          ? "Kho CK"
+          : donGiao > 300
+            ? "Kho GXT"
+            : "BC thường";
 
     return {
       bcCode: b.code,
@@ -3401,8 +3511,25 @@ export function getTerritoryMap(
       loaiHoatDong: LOAI_HD[b.loaiHoatDong] ?? b.loaiHoatDong,
       loaiDichVu: LOAI_DV[b.loaiDichVu] ?? b.loaiDichVu,
       loaiHangBc: LOAI_HANG[b.loaiHangBc] ?? b.loaiHangBc,
-      donLay, donGiao, donTrongKho, donSapVc, ontimeLay, ontimeGiao, status,
+      donLay, donGiao, donTrongKho, donSapVc,
+      khoLoadPct, khoOverload,
+      ontimeLay, ontimeGiao, pctGtc, doiKho,
+      ltcWow, gtcWow, doiKhoWow,
+      status,
     };
+  });
+
+  // === Attention status theo RANK trong tỉnh ===
+  // BC đủ volume (score >= 0): worst ~20% = đỏ, ~30% kế = vàng, còn lại xanh.
+  // BC ít volume (score -1) giữ xanh (không đủ tín hiệu để cảnh báo).
+  const ranked = bcs
+    .map((b, i) => ({ i, score: scoreArr[i] }))
+    .filter((x) => x.score >= 0)
+    .sort((a, b) => b.score - a.score);
+  const redCut = Math.ceil(ranked.length * 0.2);
+  const amberCut = Math.ceil(ranked.length * 0.5);
+  ranked.forEach((x, rank) => {
+    bcs[x.i].status = rank < redCut ? "red" : rank < amberCut ? "amber" : "green";
   });
 
   // === Voronoi tessellation: chia địa bàn thành các ô KHÔNG trùng nhau,

@@ -18,6 +18,13 @@ type Props = {
   height?: number;
 };
 
+// Heatmap attention: đỏ = cần xử lý, vàng = theo dõi, xanh = ổn
+const ATTN_FILL: Record<string, string> = {
+  green: "#4ade80",
+  amber: "#fbbf24",
+  red: "#ef4444",
+};
+
 export function LeafletTerritoryMap({ data, height = 560 }: Props) {
   const [activeBc, setActiveBc] = useState<string | null>(null);
   const selected = data.bcs.find((b) => b.bcCode === activeBc);
@@ -58,13 +65,20 @@ export function LeafletTerritoryMap({ data, height = 560 }: Props) {
                   positions={b.cell}
                   pathOptions={{
                     color: "#ffffff",
-                    fillColor: b.color,
-                    fillOpacity: isSel ? 0.6 : 0.4,
-                    weight: isSel ? 3 : 1.5,
+                    fillColor: ATTN_FILL[b.status] ?? "#9ca3af",
+                    fillOpacity: isSel ? 0.75 : b.status === "green" ? 0.32 : 0.55,
+                    weight: isSel ? 3 : 1,
                   }}
                   eventHandlers={{ click: () => setActiveBc(b.bcCode) }}
                 >
-                  <LTooltip>{b.bcName}</LTooltip>
+                  <LTooltip>
+                    {b.bcName} —{" "}
+                    {b.status === "red"
+                      ? "cần xử lý"
+                      : b.status === "amber"
+                        ? "theo dõi"
+                        : "ổn"}
+                  </LTooltip>
                 </Polygon>
               );
             })}
@@ -86,10 +100,27 @@ export function LeafletTerritoryMap({ data, height = 560 }: Props) {
             ))}
           </MapContainer>
         </div>
+        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] text-[var(--color-text-muted)]">
+          <span className="font-medium uppercase tracking-wide">
+            Mức cần chú ý:
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <span className="w-3 h-3 rounded-sm" style={{ background: ATTN_FILL.red, opacity: 0.55 }} />
+            Cần xử lý
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <span className="w-3 h-3 rounded-sm" style={{ background: ATTN_FILL.amber, opacity: 0.55 }} />
+            Theo dõi
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <span className="w-3 h-3 rounded-sm" style={{ background: ATTN_FILL.green, opacity: 0.4 }} />
+            Ổn
+          </span>
+        </div>
         <div className="text-[10px] text-[var(--color-text-muted)] mt-1">
-          Bản đồ thật (OpenStreetMap). Mỗi ô = địa bàn 1 BC (không trùng nhau,
-          ngăn bởi border — ước lượng kiểu Voronoi). Click ô để xem chi tiết.
-          {data.bcs.length} BC tại {data.provinceName}.
+          Bản đồ thật (OpenStreetMap). Mỗi ô = phạm vi 1 BC (không trùng nhau,
+          ngăn bởi border — ước lượng kiểu Voronoi), tô màu theo mức cần chú ý.
+          Click ô để xem chi tiết. {data.bcs.length} BC tại {data.provinceName}.
         </div>
       </div>
 
@@ -99,7 +130,7 @@ export function LeafletTerritoryMap({ data, height = 560 }: Props) {
         ) : (
           <div className="border border-dashed border-[var(--color-border)] rounded-md p-6 text-center text-xs text-[var(--color-text-muted)]">
             Click 1 BC trên bản đồ để xem: vùng, diện tích, loại kho, loại hình
-            hoạt động, dịch vụ, loại hàng + số liệu đơn & ontime.
+            hoạt động, tồn kho (quá tải?) + %LTC / %GTC / đổi kho kèm WoW.
           </div>
         )}
         <div className="mt-3 border border-[var(--color-border)] rounded-md p-3">
@@ -143,23 +174,113 @@ function BcDetail({ bc }: { bc: TerritoryBc }) {
         <Attr label="Kho trực thuộc" value={bc.ktcCode} mono />
         <Attr label="Diện tích hoạt động" value={`${bc.areaKm2} km²`} />
         <Attr label="Loại kho" value={bc.loaiKho} />
-        <Attr label="Loại hình hoạt động" value={bc.loaiHoatDong} />
-        <Attr label="Loại dịch vụ" value={bc.loaiDichVu} />
-        <Attr label="Loại hàng" value={bc.loaiHangBc} />
+        <Attr label="Loại hình" value={bc.loaiHoatDong} />
       </div>
 
       {/* Số liệu */}
       <div className="pt-2 border-t border-[var(--color-border-soft)] grid grid-cols-2 gap-2">
         <Stat label="Đơn lấy" value={bc.donLay} />
         <Stat label="Đơn giao" value={bc.donGiao} />
-        <Stat label="Đơn trong kho" value={bc.donTrongKho} />
         <Stat label="Sắp vận chuyển" value={bc.donSapVc} />
+        <KhoStat
+          value={bc.donTrongKho}
+          loadPct={bc.khoLoadPct}
+          overload={bc.khoOverload}
+        />
       </div>
 
-      {/* Ontime */}
-      <div className="pt-2 border-t border-[var(--color-border-soft)] space-y-2">
-        <Ontime label="Ontime lấy hàng" value={bc.ontimeLay} />
+      {/* Metrics + WoW */}
+      <div className="pt-2 border-t border-[var(--color-border-soft)] space-y-1.5">
+        <MetricWoW label="%LTC (ontime lấy)" value={bc.ontimeLay} wow={bc.ltcWow} />
+        <MetricWoW label="%GTC" value={bc.pctGtc} wow={bc.gtcWow} />
+        <MetricWoW label="Tỷ lệ đổi kho" value={bc.doiKho} wow={bc.doiKhoWow} lowerBetter />
+      </div>
+
+      {/* Ontime giao */}
+      <div className="pt-2 border-t border-[var(--color-border-soft)]">
         <Ontime label="Ontime giao hàng" value={bc.ontimeGiao} />
+      </div>
+    </div>
+  );
+}
+
+// Đơn trong kho + cảnh báo quá tải
+function KhoStat({
+  value,
+  loadPct,
+  overload,
+}: {
+  value: number;
+  loadPct: number;
+  overload: boolean;
+}) {
+  return (
+    <div
+      className={cn(
+        "rounded p-2",
+        overload ? "bg-red-50 border border-red-200" : "bg-[var(--color-hover)]",
+      )}
+    >
+      <div className="flex items-center justify-between gap-1">
+        <span className="text-[10px] uppercase tracking-wide text-[var(--color-text-muted)]">
+          Đơn trong kho
+        </span>
+        <span
+          className={cn(
+            "text-[9px] font-semibold px-1 py-px rounded",
+            overload
+              ? "bg-red-600 text-white"
+              : "bg-emerald-100 text-emerald-700",
+          )}
+        >
+          {overload ? "Quá tải" : "Bình thường"}
+        </span>
+      </div>
+      <div
+        className={cn(
+          "text-lg font-semibold tabular-nums",
+          overload ? "text-red-600" : "text-[var(--color-text)]",
+        )}
+      >
+        {formatCompactInt(value)}
+        <span className="ml-1 text-[10px] font-normal text-[var(--color-text-muted)]">
+          {formatPct(loadPct, 0)} tồn
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// 1 metric + chênh lệch WoW (điểm %)
+function MetricWoW({
+  label,
+  value,
+  wow,
+  lowerBetter,
+}: {
+  label: string;
+  value: number;
+  wow: number;
+  lowerBetter?: boolean;
+}) {
+  const improving = Math.abs(wow) < 0.05 ? null : lowerBetter ? wow < 0 : wow > 0;
+  const wowColor =
+    improving === null
+      ? "text-[var(--color-text-muted)]"
+      : improving
+        ? "text-emerald-600"
+        : "text-red-600";
+  const arrow = Math.abs(wow) < 0.05 ? "→" : wow > 0 ? "▲" : "▼";
+  const sign = wow > 0 ? "+" : wow < 0 ? "−" : "";
+  return (
+    <div className="flex items-center justify-between gap-2 text-xs">
+      <span className="text-[var(--color-text-muted)]">{label}</span>
+      <div className="flex items-center gap-2 tabular-nums">
+        <span className="font-semibold">{formatPct(value, 1)}</span>
+        <span className={cn("text-[10px] font-medium w-16 text-right", wowColor)}>
+          {arrow} {sign}
+          {Math.abs(wow).toFixed(1).replace(".", ",")} pp
+        </span>
       </div>
     </div>
   );
