@@ -111,7 +111,7 @@ export default function NetworkPage() {
           { label: "GHN Network Ops", href: "/" },
           { label: "Mạng Lưới" },
         ]}
-        title="Mạng Lưới — KTC + Linehaul"
+        title="Mạng Lưới (Network Design & Linehaul)"
         subtitle="Sức khoẻ middle-mile: lượng đơn KTC, SLA Network, cost/kg, fill rate xe. Bấm vùng để drill xuống BC."
         updatedAt={updated}
       />

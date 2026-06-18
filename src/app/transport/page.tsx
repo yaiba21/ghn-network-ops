@@ -71,7 +71,7 @@ export default function TransportPage() {
           { label: "GHN Network Ops", href: "/" },
           { label: "Vận Tải" },
         ]}
-        title="Vận Tải — Trip & Fleet"
+        title="Vận Tải (Trip & Fleet)"
         subtitle="Chuyến xe realtime, fill rate, NCC, sức khoẻ tuyến. 1 tuyến gồm nhiều trip — lọc theo mã tuyến."
         updatedAt={updated}
       />
