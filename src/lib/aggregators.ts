@@ -1717,6 +1717,62 @@ export function getRevertReasons(filter: FilterState): RevertReasonRow[] {
   ];
 }
 
+// =============================================================================
+// Deep-dive lý do đổi kho: dòng = lý do, cột = nguồn đơn × phường mới/cũ
+// =============================================================================
+
+export type RevertDeepDiveRow = {
+  reasonKey: string;
+  reasonLabel: string;
+  color: string;
+  /** % share trong từng cột, key dạng `${channelKey}-moi` / `${channelKey}-cu`. */
+  values: Record<string, number>;
+};
+
+export type RevertDeepDive = {
+  channels: { key: string; label: string }[];
+  rows: RevertDeepDiveRow[];
+};
+
+export function getRevertReasonDeepDive(filter: FilterState): RevertDeepDive {
+  const base = getRevertReasons(filter); // [{key,label,share,...,color}]
+  const channels = [
+    { key: "all", label: "Overall" },
+    { key: "spe", label: "SPE" },
+    { key: "tts", label: "TTS" },
+    { key: "sme", label: "SME" },
+  ];
+  const phuongs = ["moi", "cu"] as const;
+
+  const rows: RevertDeepDiveRow[] = base.map((r) => ({
+    reasonKey: r.key,
+    reasonLabel: r.label,
+    color: r.color,
+    values: {},
+  }));
+
+  // Mỗi cột (channel × phường) = phân bổ lý do (mock, seeded) chuẩn hoá về 100%.
+  for (const ch of channels) {
+    for (const ph of phuongs) {
+      const raw = base.map((r) => {
+        const rng = seededRand(`deep:${ch.key}:${ph}:${r.key}`);
+        let mult = 0.7 + rng() * 0.6;
+        // Phường mới: lệch về sai routing rule / sai mapping địa chỉ.
+        if (ph === "moi" && (r.key === "ops-routing-rule" || r.key === "ops-address-error"))
+          mult *= 1.4;
+        // Phường cũ: lệch về BC đóng / quá tải.
+        if (ph === "cu" && r.key === "ops-bc-closed") mult *= 1.3;
+        return r.share * mult;
+      });
+      const total = raw.reduce((a, b) => a + b, 0) || 1;
+      raw.forEach((v, i) => {
+        rows[i].values[`${ch.key}-${ph}`] = round1((v / total) * 100);
+      });
+    }
+  }
+  return { channels, rows };
+}
+
 export type DoiKhoCompare = {
   newAddress: number;
   oldAddress: number;
@@ -3109,21 +3165,21 @@ export function getJourneySankey(filter: FilterState): SankeyData {
   };
   const nodes = [
     { name: "Tạo đơn" },
-    { name: "Đã lấy hàng" },
+    { name: "Đã lấy" },
     { name: "Huỷ đơn" },
     { name: "Lấy thất bại" },
-    { name: "Phân loại KTC đi" },
-    { name: "Vận chuyển liên vùng" },
-    { name: "Nhập KTC đích" },
+    { name: "Phân loại KTC" },
+    { name: "Vận chuyển LH" },
+    { name: "KTC đích" },
     { name: "Về BC giao" },
     { name: "Đang phát" },
-    { name: "Giao thành công" },
+    { name: "Giao TC" },
     { name: "Phát thất bại" },
     { name: "Đang xử lý" },
-    { name: "Lưu kho / chờ hoàn" },
-    { name: "Giao thất bại (GTB)" },
-    { name: "Trả thành công" },
-    { name: "Trả thất bại" },
+    { name: "Lưu kho hoàn" },
+    { name: "Giao TB (GTB)" },
+    { name: "Trả TC" },
+    { name: "Trả TB" },
     { name: "Thất lạc" },
     { name: "Exception" },
   ];

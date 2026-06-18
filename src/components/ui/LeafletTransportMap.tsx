@@ -12,6 +12,7 @@ import "leaflet/dist/leaflet.css";
 import type { MapNode, MapTripRoute } from "@/lib/aggregators";
 import { cn, formatCompactInt, formatVND } from "@/lib/utils";
 import { fetchRoadPath, mapWithLimit } from "@/lib/osrm";
+import { Modal } from "./Modal";
 
 const ROUTE_COLOR: Record<string, string> = {
   green: "#10b981",
@@ -57,6 +58,7 @@ export function LeafletTransportMap({
   }, [routes]);
 
   return (
+    <>
     <div className="flex flex-col xl:flex-row gap-4">
       <div className="flex-1 min-w-0">
         <div
@@ -149,15 +151,13 @@ export function LeafletTransportMap({
         </div>
       </div>
 
-      {/* Panel: chi tiết tuyến đã chọn + danh sách tuyến */}
+      {/* Panel: danh sách tuyến (chi tiết tuyến mở popup) */}
       <div className="xl:w-80 shrink-0 space-y-3">
-        {selected && <RouteDetail route={selected} onClose={() => setSelectedTrip(null)} />}
-
         <div>
           <div className="text-[11px] uppercase tracking-wide text-[var(--color-text-muted)] mb-2">
-            {routes.length} tuyến — hover để xem, bấm để hiện chi tiết
+            {routes.length} tuyến — hover để xem, bấm để mở chi tiết
           </div>
-          <div className="space-y-1 max-h-[420px] overflow-auto pr-1">
+          <div className="space-y-1 max-h-[520px] overflow-auto pr-1">
             {routes.map((r) => (
               <button
                 key={r.tripId}
@@ -193,21 +193,24 @@ export function LeafletTransportMap({
         </div>
       </div>
     </div>
+
+      {/* Popup chi tiết tuyến */}
+      <Modal
+        open={!!selected}
+        onClose={() => setSelectedTrip(null)}
+        title={selected ? `Tuyến ${selected.origin} → ${selected.dest}` : ""}
+        subtitle={selected ? `${selected.tripId} · ${selected.type}` : ""}
+        widthClass="max-w-lg"
+      >
+        {selected && <RouteDetailBody route={selected} />}
+      </Modal>
+    </>
   );
 }
 
-// Thẻ thông tin tuyến khi click trên bản đồ / danh sách.
-function RouteDetail({
-  route,
-  onClose,
-}: {
-  route: MapTripRoute;
-  onClose: () => void;
-}) {
-  const lateLabel =
-    route.lateMin <= 15
-      ? "Đến đúng giờ"
-      : `Trễ ${route.lateMin}'`;
+// Nội dung popup chi tiết tuyến (header/close do Modal lo).
+function RouteDetailBody({ route }: { route: MapTripRoute }) {
+  const lateLabel = route.lateMin <= 15 ? "Đến đúng giờ" : `Trễ ${route.lateMin}'`;
   const lateColor =
     route.lateMin <= 15
       ? "text-emerald-600"
@@ -215,31 +218,8 @@ function RouteDetail({
         ? "text-amber-600"
         : "text-red-600";
   return (
-    <div className="border border-[var(--color-border)] rounded-md p-3 bg-white">
-      <div className="flex items-start gap-2">
-        <span
-          className="mt-1 w-2.5 h-2.5 rounded-full shrink-0"
-          style={{ backgroundColor: ROUTE_COLOR[route.status] }}
-        />
-        <div className="min-w-0">
-          <div className="text-xs font-semibold text-[var(--color-text)] truncate">
-            {route.origin} → {route.dest}
-          </div>
-          <div className="text-[10px] text-[var(--color-text-muted)] font-mono">
-            {route.tripId} · {route.type}
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={onClose}
-          className="ml-auto text-[var(--color-text-muted)] hover:text-[var(--color-text)] text-xs leading-none"
-          aria-label="Đóng"
-        >
-          ✕
-        </button>
-      </div>
-
-      <div className="mt-2.5 grid grid-cols-2 gap-2">
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         <RStat label="Parcels" value={formatCompactInt(route.parcels)} />
         <RStat label="Tổng km" value={`${route.totalKm} km`} />
         <RStat label="Chi phí" value={formatVND(route.cost, true)} />
@@ -250,21 +230,24 @@ function RouteDetail({
         <RStat label="Xe" value={route.vehicle} />
       </div>
 
-      <div className={cn("mt-2 text-xs font-medium", lateColor)}>{lateLabel}</div>
+      <div className={cn("text-sm font-medium", lateColor)}>{lateLabel}</div>
 
-      <div className="mt-2 pt-2 border-t border-[var(--color-border-soft)]">
-        <div className="text-[10px] uppercase tracking-wide text-[var(--color-text-muted)] mb-1">
+      <div className="pt-2 border-t border-[var(--color-border-soft)]">
+        <div className="text-[10px] uppercase tracking-wide text-[var(--color-text-muted)] mb-1.5">
           Chuỗi điểm chạm
         </div>
         <ol className="space-y-1">
           {route.stops.map((s) => (
-            <li key={s.code + s.order} className="flex items-center gap-1.5 text-[11px]">
+            <li key={s.code + s.order} className="flex items-center gap-1.5 text-xs">
               <span
-                className="w-1.5 h-1.5 rounded-full shrink-0"
+                className="w-2 h-2 rounded-full shrink-0"
                 style={{ backgroundColor: s.code.startsWith("BC-") ? "#10b981" : "#8b5cf6" }}
               />
               <span className="text-[var(--color-text-muted)] tabular-nums">{s.order}.</span>
               <span className="truncate">{s.label}</span>
+              <span className="ml-auto text-[10px] text-[var(--color-text-muted)]">
+                {s.code.startsWith("BC-") ? "BC" : "KTC"}
+              </span>
             </li>
           ))}
         </ol>

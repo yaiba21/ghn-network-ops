@@ -5,13 +5,11 @@ import { useFilter } from "@/components/filter/FilterContext";
 import {
   getDoiKhoBreakdown,
   getDoiKhoByChannelAddr,
-  getEngineResolveLayers,
+  getRevertReasonDeepDive,
   getRevertReasons,
   getRoutingAlerts,
   getRoutingCargoComparison,
-  getRoutingChannelFlow,
   getRoutingHeaderKpis,
-  getRoutingRegionComparison,
   getRoutingWowMetrics,
   getTopRevertBcs,
 } from "@/lib/aggregators";
@@ -37,14 +35,12 @@ import {
 export default function RoutingPage() {
   const { filter } = useFilter();
   const header = useMemo(() => getRoutingHeaderKpis(filter), [filter]);
-  const regionRows = useMemo(() => getRoutingRegionComparison(filter), [filter]);
-  const channelFlow = useMemo(() => getRoutingChannelFlow(filter), [filter]);
   const revertReasons = useMemo(() => getRevertReasons(filter), [filter]);
   const topBcs = useMemo(() => getTopRevertBcs(filter, 20), [filter]);
   const doiKhoBreakdown = useMemo(() => getDoiKhoBreakdown(filter), [filter]);
   const doiKhoByChannel = useMemo(() => getDoiKhoByChannelAddr(filter), [filter]);
+  const reasonDeepDive = useMemo(() => getRevertReasonDeepDive(filter), [filter]);
   const wowMetrics = useMemo(() => getRoutingWowMetrics(filter), [filter]);
-  const engineLayers = useMemo(() => getEngineResolveLayers(filter), [filter]);
   const cargoRows = useMemo(() => getRoutingCargoComparison(filter), [filter]);
   const alerts = useMemo(() => getRoutingAlerts(filter), [filter]);
   const updated = dataUpdatedAt();
@@ -77,10 +73,8 @@ export default function RoutingPage() {
 
       {alerts.length > 0 && <AlertBanner alerts={alerts} />}
 
-      {/* === Header KPI (key metrics) === */}
-      <section className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-        <KpiCardFrom kpi={header.chiDinhKho} size="sm" />
-        <KpiCardFrom kpi={header.khongChiDinh} size="sm" />
+      {/* === Header KPI (key metrics — tập trung đổi kho) === */}
+      <section className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <KpiCardFrom kpi={header.doiKhoOverall} size="sm" />
         <div className="border border-[var(--color-border)] rounded-md bg-white p-3">
           <div className="text-[11px] uppercase tracking-wide text-[var(--color-text-muted)]">
@@ -157,51 +151,43 @@ export default function RoutingPage() {
         />
       </Card>
 
-      {/* === Engine resolve ở bước nào + So sánh vùng === */}
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
-        <Card
-          title="Engine resolve ở bước nào"
-          subtitle="ORS phân giải đơn ở layer nào khi tạo đơn."
-        >
-          <div className="space-y-3">
-            {engineLayers.map((l) => (
-              <div key={l.key} className="flex items-center gap-3">
-                <div className="w-24 shrink-0 text-sm text-[var(--color-text)]">
-                  {l.label}
-                </div>
-                <div className="flex-1 h-3 bg-[var(--color-border-soft)] rounded-full overflow-hidden">
-                  <div
-                    className="h-full rounded-full transition-[width] duration-500"
-                    style={{ width: `${l.pct}%`, backgroundColor: l.color }}
-                  />
-                </div>
-                <div className="w-12 shrink-0 text-right text-sm font-semibold tabular-nums">
-                  {formatPct(l.pct, 0)}
-                </div>
-              </div>
-            ))}
-            <div className="text-xs text-[var(--color-text-muted)] pt-1">
-              % &quot;mặc định&quot; cao = thiếu config BC → nguồn revert sớm
-            </div>
-          </div>
-        </Card>
-
-        <div className="xl:col-span-2">
-          <Card
-            title={`So sánh ${regionRows.length} vùng — phân tuyến + đổi kho`}
-            subtitle="Vùng nào đổi kho cao nhất / phân tuyến đúng thấp nhất. Sort cột để tìm vùng cần ưu tiên xây rule."
-          >
-            <DataTable columns={regionColumns} data={regionRows} rowKey={(r) => r.regionCode} />
-          </Card>
-        </div>
-      </div>
-
-      {/* === Channel flow — 3 cột đổi kho === */}
+      {/* === Top BC đổi kho + lý do (move lên ngay dưới bảng toàn quốc) === */}
       <Card
-        title="Channel → Routing Layer → đổi kho"
-        subtitle="Mỗi channel theo polygon layer riêng: SPE = Zone-based · TTS = Phường cũ · SME = Phường mới · B2B = Freight. 3 cột đổi kho phân biệt mẫu số."
+        title="Top 20 BC đổi kho cao nhất + lý do"
+        subtitle="BC nào đang đổi kho nhiều nhất, lý do chủ đạo. Ưu tiên xử lý các BC đỏ."
       >
-        <DataTable columns={channelColumns} data={channelFlow} rowKey={(r) => r.channel} />
+        <DataTable
+          columns={topBcColumns}
+          data={topBcs}
+          rowKey={(r) => r.bcCode}
+          searchable
+          searchPlaceholder="Tìm BC, tỉnh, lý do..."
+          pageSize={10}
+        />
+      </Card>
+
+      {/* === Deep-dive lý do đổi kho × nguồn đơn × phường === */}
+      <Card
+        title="Deep-dive lý do đổi kho — theo nguồn đơn × phường mới/cũ"
+        subtitle="Mỗi cột (Overall / SPE / TTS / SME × phường mới/cũ) là phân bổ % các lý do đổi kho. Phường mới lệch về sai routing rule / sai mapping địa chỉ."
+        actions={
+          <div className="text-[10px] uppercase tracking-wide text-[var(--color-text-muted)]">
+            Phân bổ ước lượng — mock
+          </div>
+        }
+      >
+        <ReasonDeepDiveTable data={reasonDeepDive} />
+      </Card>
+
+      {/* === Phân giải gán đơn — chỉ định kho (move xuống dưới) === */}
+      <Card
+        title="Phân giải gán đơn — chỉ định kho"
+        subtitle="Tỷ lệ đơn được ORS chỉ định kho (Chỉ định BC + Bộ BC) vs rơi về mặc định. Cao = phân tuyến chủ động, ít revert sớm."
+      >
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <KpiCardFrom kpi={header.chiDinhKho} size="sm" />
+          <KpiCardFrom kpi={header.khongChiDinh} size="sm" />
+        </div>
       </Card>
 
       {/* === So sánh theo loại hàng — BC lấy/giao === */}
@@ -245,21 +231,6 @@ export default function RoutingPage() {
             </div>
           ))}
         </div>
-      </Card>
-
-      {/* === Top BC đổi kho + lý do === */}
-      <Card
-        title="Top 20 BC đổi kho cao nhất + lý do"
-        subtitle="BC nào đang đổi kho nhiều nhất, lý do chủ đạo. Ưu tiên xử lý các BC đỏ."
-      >
-        <DataTable
-          columns={topBcColumns}
-          data={topBcs}
-          rowKey={(r) => r.bcCode}
-          searchable
-          searchPlaceholder="Tìm BC, tỉnh, lý do..."
-          pageSize={10}
-        />
       </Card>
 
       {/* === Revert reasons + cost impact === */}
@@ -442,39 +413,88 @@ const doiKhoAddrColumns: Column<ReturnType<typeof getDoiKhoByChannelAddr>[number
   },
 ];
 
-const regionColumns: Column<ReturnType<typeof getRoutingRegionComparison>[number]>[] = [
-  { key: "regionName", label: "Vùng", render: (r) => <span className="font-medium">{r.regionName}</span> },
-  { key: "orders", label: "Lượng đơn", align: "right", sortable: true, sortValue: (r) => r.orders, render: (r) => formatCompactInt(r.orders) },
-  {
-    key: "phanTuyenDung", label: "% Phân tuyến đúng", align: "right", sortable: true, sortValue: (r) => r.phanTuyenDung,
-    render: (r) => <span className={r.phanTuyenDung >= 98.5 ? "text-emerald-600" : r.phanTuyenDung >= 95 ? "text-amber-600" : "text-red-600"}>{formatPct(r.phanTuyenDung, 1)}</span>,
-  },
-  {
-    key: "doiKhoOverall", label: "% Đổi kho overall", align: "right", sortable: true, sortValue: (r) => r.doiKhoOverall,
-    render: (r) => <span className={r.doiKhoOverall <= 1.5 ? "text-emerald-600" : r.doiKhoOverall <= 2.3 ? "text-amber-600" : "text-red-600"}>{formatPct(r.doiKhoOverall, 1)}</span>,
-  },
-  {
-    key: "doiKhoNewAddr", label: "% Đổi kho địa chỉ mới", align: "right", sortable: true, sortValue: (r) => r.doiKhoNewAddr,
-    render: (r) => <span className={r.doiKhoNewAddr <= 6 ? "text-emerald-600" : r.doiKhoNewAddr <= 10 ? "text-amber-600" : "text-red-600"}>{formatPct(r.doiKhoNewAddr, 1)}</span>,
-  },
-];
-
-const channelColumns: Column<ReturnType<typeof getRoutingChannelFlow>[number]>[] = [
-  { key: "channelLabel", label: "Channel", render: (r) => <span className="font-medium">{r.channelLabel}</span> },
-  { key: "ordersTotal", label: "Lượng đơn", align: "right", sortable: true, sortValue: (r) => r.ordersTotal, render: (r) => formatCompactInt(r.ordersTotal) },
-  {
-    key: "doiKhoOverall", label: "Đổi kho overall", align: "right", sortable: true, sortValue: (r) => r.doiKhoOverall,
-    render: (r) => <span className={r.doiKhoOverall <= 2.3 ? "text-emerald-600" : r.doiKhoOverall <= 4 ? "text-amber-600" : "text-red-600"}>{formatPct(r.doiKhoOverall, 1)}</span>,
-  },
-  {
-    key: "doiKhoNewAddr", label: "Đổi kho phường MỚI", align: "right", sortable: true, sortValue: (r) => r.doiKhoNewAddr,
-    render: (r) => <span className={r.doiKhoNewAddr <= 6 ? "text-emerald-600" : r.doiKhoNewAddr <= 10 ? "text-amber-600" : "text-red-600"}>{formatPct(r.doiKhoNewAddr, 1)}</span>,
-  },
-  {
-    key: "doiKhoOldAddr", label: "Đổi kho phường CŨ", align: "right", sortable: true, sortValue: (r) => r.doiKhoOldAddr,
-    render: (r) => <span className={r.doiKhoOldAddr <= 2 ? "text-emerald-600" : r.doiKhoOldAddr <= 4 ? "text-amber-600" : "text-red-600"}>{formatPct(r.doiKhoOldAddr, 1)}</span>,
-  },
-];
+// Bảng deep-dive: dòng = lý do, cột = nguồn đơn (Overall/SPE/TTS/SME) × phường mới/cũ.
+function ReasonDeepDiveTable({
+  data,
+}: {
+  data: ReturnType<typeof getRevertReasonDeepDive>;
+}) {
+  const phuongs = [
+    { k: "moi", l: "Mới" },
+    { k: "cu", l: "Cũ" },
+  ];
+  const tone = (v: number) =>
+    v >= 30 ? "text-red-600 font-semibold" : v >= 18 ? "text-amber-600" : "text-[var(--color-text)]";
+  return (
+    <div className="overflow-x-auto border border-[var(--color-border)] rounded-md">
+      <table className="text-sm border-collapse w-full">
+        <thead className="bg-[var(--color-table-head)]">
+          <tr>
+            <th
+              rowSpan={2}
+              className="sticky left-0 bg-[var(--color-table-head)] z-10 px-3 py-2 text-left text-[11px] uppercase tracking-wide text-[var(--color-text-muted)] font-medium align-bottom"
+            >
+              Lý do đổi kho
+            </th>
+            {data.channels.map((ch) => (
+              <th
+                key={ch.key}
+                colSpan={2}
+                className="px-3 py-1.5 text-center text-[11px] uppercase tracking-wide text-[var(--color-text-muted)] font-semibold border-l border-[var(--color-border)]"
+              >
+                {ch.label}
+              </th>
+            ))}
+          </tr>
+          <tr>
+            {data.channels.map((ch) =>
+              phuongs.map((p, pi) => (
+                <th
+                  key={ch.key + p.k}
+                  className={cn(
+                    "px-3 py-1 text-right text-[10px] font-medium text-[var(--color-text-muted)]",
+                    pi === 0 && "border-l border-[var(--color-border)]",
+                  )}
+                >
+                  {p.l}
+                </th>
+              )),
+            )}
+          </tr>
+        </thead>
+        <tbody>
+          {data.rows.map((r) => (
+            <tr key={r.reasonKey} className="border-t border-[var(--color-border-soft)]">
+              <td className="sticky left-0 bg-white z-10 px-3 py-2">
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-sm shrink-0" style={{ backgroundColor: r.color }} />
+                  <span className="truncate">{r.reasonLabel}</span>
+                </span>
+              </td>
+              {data.channels.map((ch) =>
+                phuongs.map((p, pi) => {
+                  const v = r.values[`${ch.key}-${p.k}`] ?? 0;
+                  return (
+                    <td
+                      key={ch.key + p.k}
+                      className={cn(
+                        "px-3 py-2 text-right tabular-nums",
+                        tone(v),
+                        pi === 0 && "border-l border-[var(--color-border-soft)]",
+                      )}
+                    >
+                      {formatPct(v, 1)}
+                    </td>
+                  );
+                }),
+              )}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
 function CargoBar({
   label,

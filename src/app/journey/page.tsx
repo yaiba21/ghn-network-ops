@@ -31,6 +31,9 @@ import {
   type LoaiHang,
 } from "@/lib/types";
 
+// TODO: thay bằng URL trang đơn hàng nội bộ thật (mở dạng `${ORDER_DETAIL_URL}{orderId}`).
+const ORDER_DETAIL_URL = "https://noi-bo.ghn.vn/don-hang/";
+
 export default function JourneyPage() {
   const { filter } = useFilter();
 
@@ -81,7 +84,7 @@ export default function JourneyPage() {
         title="Sankey — luồng đơn theo trạng thái"
         subtitle="Độ dày luồng = số đơn. Tạo đơn → Lấy → Phân loại KTC → Linehaul → BC giao → Phát → GTC / Phát thất bại → Hoàn / Thất lạc / Exception."
       >
-        <SankeyChart data={sankey} height={560} />
+        <SankeyChart data={sankey} height={620} />
       </Card>
 
       {/* === Các final status của đơn hàng === */}
@@ -226,9 +229,19 @@ function OrdersDrillTable({
   const cols: Column<ReturnType<typeof getJourneyTopOrders>[number]>[] = [
     {
       key: "mvd",
-      label: "MVĐ",
+      label: "Order ID",
       sortable: true,
-      render: (r) => <span className="font-mono text-xs">{r.mvd}</span>,
+      render: (r) => (
+        <a
+          href={`${ORDER_DETAIL_URL}${r.mvd}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="font-mono text-xs text-[var(--color-ghn-red)] hover:underline"
+          title="Mở đơn trên hệ thống nội bộ"
+        >
+          {r.mvd}
+        </a>
+      ),
     },
     {
       key: "createdAt",
@@ -304,7 +317,7 @@ function OrdersDrillTable({
         data={rows}
         rowKey={(r) => r.mvd}
         searchable
-        searchPlaceholder="Tìm MVĐ, tỉnh, trạng thái..."
+        searchPlaceholder="Tìm Order ID, tỉnh, trạng thái..."
         pageSize={15}
       />
     </Card>
