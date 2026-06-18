@@ -6,6 +6,7 @@
 // =============================================================================
 
 import {
+  defaultFilter,
   getBcs,
   getFactDeliveries,
   getFactOrders,
@@ -19,6 +20,7 @@ import { KPI, KPI_DEFINITION, statusFromValue } from "./kpi-config";
 import { REGION_LABEL_VI } from "./types";
 import type {
   AlertItem,
+  ChannelCode,
   FactOrder,
   FactPickup,
   FactTrip,
@@ -28,6 +30,7 @@ import type {
   KpiDirection,
   KpiUnit,
   KpiValue,
+  LoaiHang,
   RegionCode,
   Status,
 } from "./types";
@@ -2180,6 +2183,59 @@ export function getNetworkKeyMetrics(filter: FilterState): KpiValue[] {
       prevValue: prevOf(spOvt),
     }),
   ];
+}
+
+/**
+ * Giá trị hiện tại của 1 metric theo phạm vi (cho trang Quản lý mục tiêu).
+ * Cửa sổ mặc định = 30 ngày gần nhất. Metric trip-based chưa scope theo vùng/BC.
+ */
+export function computeMetricValue(
+  metricKey: string,
+  scopeLevel: string,
+  scopeValue: string,
+): number {
+  const f: FilterState = { ...defaultFilter() };
+  if (scopeValue) {
+    if (scopeLevel === "region") f.regionCode = scopeValue as RegionCode;
+    else if (scopeLevel === "channel") f.channelCode = scopeValue as ChannelCode;
+    else if (scopeLevel === "loaiHang") f.loaiHang = scopeValue as LoaiHang;
+    else if (scopeLevel === "ktc") f.ktcCode = scopeValue;
+    else if (scopeLevel === "bc") f.bcCode = scopeValue;
+  }
+  const orders = filterOrders(f);
+  const orderIds = new Set(orders.map((o) => o.orderId));
+  const trips = filterTrips(f);
+  const pickups = filterPickups(f, orderIds);
+  const total = orders.length || 1;
+
+  switch (metricKey) {
+    case "ontimeNetwork":
+      return computeOntimeNetwork(orders);
+    case "pctTC":
+      return computePctTc(orderIds);
+    case "pctLTC":
+      return computePctLtc(pickups);
+    case "opr":
+      return round1(pct(orders.filter((o) => o.pickedTs).length, total));
+    case "odr":
+      return round1(pct(orders.filter((o) => o.deliveredTs).length, total));
+    case "pctDaGan":
+      return computePctDaGan(pickups);
+    case "hangVeBc4Ca":
+      return computeHangVeBc4Ca(orders);
+    case "doiKhoOverall":
+      return computeDoiKhoOverall(orders);
+    case "fillRateKg":
+      return computeFillRateKg(trips);
+    case "ontimeVanTai":
+      return computeOntimeVanTai(trips);
+    case "pctEmptyMileage":
+      return computeEmptyMileage(trips);
+    case "costPerKg":
+      return computeCostPerKg(trips);
+    default:
+      return 0;
+  }
 }
 
 export function getRegionScorecard(filter: FilterState): RegionScorecardRow[] {
