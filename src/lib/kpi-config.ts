@@ -827,6 +827,48 @@ export const KPI: Record<string, KpiSpec> = {
   },
 };
 
+/**
+ * Giải thích công thức từng KPI (keyed theo KPI key).
+ * Hiện trong tooltip ℹ️ trên KpiCard → user hiểu metric tính thế nào.
+ */
+export const KPI_DEFINITION: Record<string, string> = {
+  ontimeNetwork:
+    "% đơn giao đúng SLA toàn trình middle-mile = đơn (delivered ≤ promised) / tổng đơn đã giao.",
+  pctTC:
+    "% Giao thành công (GTC) = đơn GTC / đơn đã đến quyết định giao (delivered + GTB + hoàn). Tính per-order.",
+  hangVeBc4Ca:
+    "% đơn về đến BC giao còn ≥4 ca trước hạn (1 ca ~5h) = đơn về kịp ≥4 ca / tổng đơn về BC giao.",
+  costPerKgNetwork:
+    "Chi phí / kg = tổng chi phí linehaul / tổng khối lượng quy đổi (đ/kg).",
+  ontimeVanTai:
+    "% chuyến xe đến đúng giờ = chuyến (actual_arrive ≤ plan_arrive + 15') / tổng chuyến. Góc nhìn transport.",
+  pctLTC:
+    "Ontime lấy (LTC) = lượt lấy đúng cut-off / tổng lượt cần lấy. Góc nhìn first-mile.",
+  odr: "Ontime giao = đơn giao trước/đúng hẹn / đơn đã giao tại last-mile (delivered ≤ promised).",
+  fillRateKg:
+    "Fill rate kg = tổng kg thực rời điểm / tổng tải chuẩn của xe. Cao = xe đầy, tận dụng tốt.",
+  pctEmptyMileage:
+    "% Empty Mileage = km chạy rỗng (không tải) / tổng km. Thường là chiều về. Thấp = ít lãng phí.",
+  doiKhoOverall:
+    "Tỷ lệ đổi kho = đơn bị đổi kho giao (new_wh ≠ old_wh) / tổng đơn nhập BC giao.",
+  doiKhoMoi:
+    "% đổi kho địa chỉ MỚI = đơn đổi kho trong nhóm phường mới / tổng đơn phường mới.",
+  fdRate:
+    "FD (Failed Delivery) = đơn giao thất bại lần đầu / tổng đơn hoàn tất.",
+  nddAchieve:
+    "NDD Achieve = đơn giao đúng Next-Day-Delivery / tổng đơn cam kết NDD.",
+  pctPhanTuyenDung:
+    "% phân tuyến đúng lần đầu ≈ 100% − tỷ lệ đổi kho. Phân tuyến sai = phải đổi kho.",
+  routingAccuracy:
+    "Routing accuracy = đơn định tuyến đúng (đúng sort code + hub) / tổng đơn định tuyến.",
+  misRouteRate: "% mis-route = đơn bị định tuyến sai / tổng đơn định tuyến.",
+  sortAccuracy: "Sort accuracy KTC = kiện sort đúng / tổng kiện sort tại KTC.",
+  tatHub: "TAT tại KTC = thời gian trung bình từ nhập KTC đến xuất KTC (giờ).",
+  emptyBackhaul: "% chuyến rỗng chiều về = chuyến về không tải / tổng chuyến.",
+  opr: "OPR (Order Performance Rate) = chuyến/đơn đạt chuẩn vận hành / tổng.",
+  aov: "AOV = tổng cước phí / tổng số đơn (đ/đơn).",
+};
+
 export function statusFromValue(spec: KpiSpec, value: number): Status {
   const [a, b] = spec.thresholds;
   if (spec.direction === "higher-better") {

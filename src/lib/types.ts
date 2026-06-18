@@ -425,6 +425,8 @@ export type KpiValue = {
   sparkline: number[];
   status: Status;
   direction: KpiDirection;
+  // Giải thích công thức (hiện trong tooltip ℹ️ trên KpiCard).
+  definition?: string;
 };
 
 // --- Page-level KPI bundles ---------------------------------------------

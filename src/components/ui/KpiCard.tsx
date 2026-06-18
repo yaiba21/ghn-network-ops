@@ -1,4 +1,4 @@
-import { ArrowDownRight, ArrowUpRight, Minus } from "lucide-react";
+import { ArrowDownRight, ArrowUpRight, Info, Minus } from "lucide-react";
 import { cn, formatDelta, formatValue } from "@/lib/utils";
 import type { KpiDirection, KpiUnit, Status } from "@/lib/types";
 import { Sparkline } from "./Sparkline";
@@ -14,10 +14,30 @@ type Props = {
   status: Status;
   direction: KpiDirection;
   hint?: string;
+  /** Giải thích công thức — hiện trong tooltip ℹ️ cạnh nhãn. */
+  definition?: string;
   className?: string;
   /** Slim variant used inside dense compositional cards (e.g. paired stats). */
   size?: "md" | "sm";
 };
+
+/** Icon ℹ️ + tooltip hover hiện công thức/định nghĩa metric. */
+function DefinitionTip({ text }: { text: string }) {
+  return (
+    <span className="group/def relative inline-flex shrink-0">
+      <Info
+        className="w-3 h-3 text-[var(--color-text-muted)] hover:text-[var(--color-text)] cursor-help"
+        aria-label="Giải thích chỉ số"
+      />
+      <span
+        role="tooltip"
+        className="pointer-events-none absolute left-1/2 top-full z-30 mt-1 w-56 -translate-x-1/2 rounded-md border border-[var(--color-border)] bg-white px-2.5 py-2 text-[11px] font-normal normal-case leading-snug tracking-normal text-[var(--color-text)] opacity-0 shadow-lg transition-opacity duration-150 group-hover/def:opacity-100"
+      >
+        {text}
+      </span>
+    </span>
+  );
+}
 
 export function KpiCard({
   label,
@@ -29,6 +49,7 @@ export function KpiCard({
   status,
   direction,
   hint,
+  definition,
   className,
   size = "md",
 }: Props) {
@@ -58,8 +79,9 @@ export function KpiCard({
       )}
     >
       <div className="flex items-start justify-between gap-2">
-        <div className="text-[11px] uppercase tracking-wide text-[var(--color-text-muted)] truncate">
-          {label}
+        <div className="flex min-w-0 items-center gap-1 text-[11px] uppercase tracking-wide text-[var(--color-text-muted)]">
+          <span className="truncate">{label}</span>
+          {definition && <DefinitionTip text={definition} />}
         </div>
         <StatusDot status={status} />
       </div>
@@ -135,6 +157,7 @@ export function KpiCardFrom({
       status={kpi.status}
       direction={kpi.direction}
       hint={hint}
+      definition={kpi.definition}
       className={className}
       size={size}
     />

@@ -15,7 +15,7 @@ import {
   getProvinces,
 } from "./mock-data";
 import { Delaunay } from "d3-delaunay";
-import { KPI, statusFromValue } from "./kpi-config";
+import { KPI, KPI_DEFINITION, statusFromValue } from "./kpi-config";
 import { REGION_LABEL_VI } from "./types";
 import type {
   AlertItem,
@@ -347,6 +347,7 @@ function buildKpi(
     sparkline,
     status: statusFromValue(spec, value),
     direction: spec.direction,
+    definition: KPI_DEFINITION[kpiKey as string],
   };
 }
 
