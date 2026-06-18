@@ -11,7 +11,6 @@ import {
   getOverviewModuleHealth,
   getOverviewRegionHeatmap,
   getSlaComparison,
-  getStageOverview,
 } from "@/lib/aggregators";
 import { dataUpdatedAt } from "@/lib/mock-data";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -23,9 +22,7 @@ import { ModuleHealthCard } from "@/components/ui/ModuleHealthCard";
 import { Heatmap } from "@/components/ui/Heatmap";
 import { MetricChart } from "@/components/ui/MetricChart";
 import { DataTable, type Column } from "@/components/ui/DataTable";
-import { StatusDot } from "@/components/ui/StatusDot";
 import {
-  cn,
   formatCompactInt,
   formatHours,
   formatPct,
@@ -44,7 +41,6 @@ export default function OverallPage() {
   const loaiHangs = useMemo(() => getLoaiHangComparison(filter), [filter]);
   const slas = useMemo(() => getSlaComparison(filter), [filter]);
   const trend = useMemo(() => getDailyTrend(filter, 14), [filter]);
-  const stages = useMemo(() => getStageOverview(filter), [filter]);
   const updated = dataUpdatedAt();
 
   return (
@@ -84,25 +80,25 @@ export default function OverallPage() {
         </div>
       </section>
 
-      {/* === Module health === */}
+      {/* === Pulse check hành trình đơn hàng === */}
       <section>
         <div className="text-[11px] uppercase tracking-wide text-[var(--color-text-muted)] mb-2">
-          Sức khoẻ theo mô-đun (click drill xuống trang chi tiết)
+          Pulse check hành trình đơn hàng
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
           {/* Last Mile xếp cuối theo flow đơn */}
-          <ModuleHealthCard module={modules[0]} href="#chang-van-hanh" />
+          <ModuleHealthCard module={modules[0]} href="/journey" />
           <ModuleHealthCard module={modules[1]} href="/network" />
           <ModuleHealthCard module={modules[3]} href="/routing" />
           <ModuleHealthCard module={modules[4]} href="/transport" />
-          <ModuleHealthCard module={modules[2]} href="#chang-van-hanh" />
+          <ModuleHealthCard module={modules[2]} href="/journey" />
         </div>
       </section>
 
       {/* === Trend 14 ngày === */}
       <Card
         title="Trend 14 ngày — sản lượng + Ontime + %GTC"
-        subtitle="Xu hướng theo ngày. Spike volume thường kèm drop Ontime — kiểm tra ca/lane cụ thể."
+        subtitle="Xu hướng theo ngày"
       >
         <MetricChart
           type="combo"
@@ -142,71 +138,6 @@ export default function OverallPage() {
               : formatCompactInt(v)
           }
         />
-      </Card>
-
-      {/* === 5 chặng vận hành (gom từ trang Các Chặng cũ) === */}
-      <Card
-        title="Metrics theo 5 chặng vận hành"
-        subtitle="First-mile → KTC đi → Last-mile → KTC về → Trả. Lượng đơn · LT TB · % thành công · # NV active mỗi chặng."
-      >
-        <div id="chang-van-hanh" className="scroll-mt-20 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-          {stages.map((s) => (
-            <div
-              key={s.stageKey}
-              className="border border-[var(--color-border)] rounded-md overflow-hidden bg-white"
-            >
-              <div
-                className={cn(
-                  "h-1",
-                  s.stageKey === "fm"
-                    ? "bg-emerald-500"
-                    : s.stageKey === "ktc-fw"
-                      ? "bg-violet-500"
-                      : s.stageKey === "lm"
-                        ? "bg-amber-500"
-                        : s.stageKey === "ktc-ret"
-                          ? "bg-sky-500"
-                          : "bg-rose-500",
-                )}
-              />
-              <div className="p-3">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-semibold text-[var(--color-text)] truncate">
-                    {s.stageLabel}
-                  </span>
-                  <StatusDot status={s.status} />
-                </div>
-                <div className="text-2xl font-semibold tabular-nums text-[var(--color-text)]">
-                  {formatCompactInt(s.throughput)}
-                </div>
-                <div className="text-[10px] text-[var(--color-text-muted)]">
-                  lượng đơn / kỳ filter
-                </div>
-                <div className="mt-2 pt-2 border-t border-[var(--color-border-soft)] grid grid-cols-2 gap-2 text-xs">
-                  <div>
-                    <div className="text-[10px] uppercase text-[var(--color-text-muted)]">
-                      LT TB
-                    </div>
-                    <div className="tabular-nums font-medium">
-                      {formatHours(s.ltMedianH)}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-[10px] uppercase text-[var(--color-text-muted)]">
-                      Success
-                    </div>
-                    <div className="tabular-nums font-medium">
-                      {formatPct(s.successRate, 1)}
-                    </div>
-                  </div>
-                </div>
-                <div className="mt-1.5 text-[10px] text-[var(--color-text-muted)]">
-                  ~{formatCompactInt(s.activeNV)} nhân viên active
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
       </Card>
 
       {/* === Heatmap 14 vùng × 4 cột === */}

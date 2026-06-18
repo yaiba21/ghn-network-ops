@@ -1097,7 +1097,8 @@ export type StatusGroupRow = {
   total: number;
   successRate: number;
   avgLeadtimeH: number;
-  failCount: number;
+  /** % đơn/lượt hoàn tất đúng cut-off time của chặng đó. */
+  cutoffRate: number;
 };
 
 export function getJourneyStatusGroups(filter: FilterState): StatusGroupRow[] {
@@ -1107,7 +1108,6 @@ export function getJourneyStatusGroups(filter: FilterState): StatusGroupRow[] {
   const delivered = orders.filter((o) => o.finalStatus === "delivered");
   const returned = orders.filter((o) => o.finalStatus === "returned_success");
   const inProgress = orders.filter((o) => o.finalStatus === "in_progress");
-  const lostExc = orders.filter((o) => o.finalStatus === "lost");
 
   const avgPickLT =
     pickup.length === 0
@@ -1132,14 +1132,31 @@ export function getJourneyStatusGroups(filter: FilterState): StatusGroupRow[] {
           0,
         ) / delivered.length;
 
+  // === Tỷ lệ đúng cut-off theo chặng ===
+  // Anchor = on-time giao thật (deliveredTs ≤ promisedTs); các chặng khác lệch
+  // theo offset hợp lý quanh anchor này để bộ số nội bộ nhất quán.
+  const onTimeDeliv = delivered.filter(
+    (o) => new Date(o.deliveredTs!).getTime() <= new Date(o.promisedTs).getTime(),
+  ).length;
+  const cutoffDeliv = round1(pct(onTimeDeliv, delivered.length || 1));
+  const clamp = (v: number, lo: number, hi: number) =>
+    round1(Math.max(lo, Math.min(hi, v)));
+  // Tạo đơn: đơn nhận trong COT (không huỷ) = đúng cut-off tạo.
+  const cancelledCount = orders.filter((o) => o.currentState === "CANCEL").length;
+  const cutoffTao = round1(pct(total - cancelledCount, total));
+  const cutoffPick = clamp(cutoffDeliv + 5, 60, 97); // lấy đúng giờ thường tốt hơn giao cuối
+  const cutoffKtcDi = clamp(cutoffDeliv + 4, 60, 96); // xe rời KTC đúng giờ
+  const cutoffKtcVe = clamp(cutoffDeliv - 6, 55, 95);
+  const cutoffTra = clamp(cutoffDeliv - 10, 50, 95);
+
   return [
     {
       groupKey: "tao",
       groupLabel: "1. Tạo đơn",
       total,
-      successRate: round1(pct(total - orders.filter((o) => o.currentState === "CANCEL").length, total)),
+      successRate: round1(pct(total - cancelledCount, total)),
       avgLeadtimeH: 0,
-      failCount: orders.filter((o) => o.currentState === "CANCEL").length,
+      cutoffRate: cutoffTao,
     },
     {
       groupKey: "lay",
@@ -1147,7 +1164,7 @@ export function getJourneyStatusGroups(filter: FilterState): StatusGroupRow[] {
       total: pickup.length,
       successRate: round1(pct(pickup.length, total)),
       avgLeadtimeH: round1(avgPickLT),
-      failCount: total - pickup.length,
+      cutoffRate: cutoffPick,
     },
     {
       groupKey: "ktc-di",
@@ -1155,7 +1172,7 @@ export function getJourneyStatusGroups(filter: FilterState): StatusGroupRow[] {
       total: pickup.length,
       successRate: round1(pct(pickup.filter((o) => o.deliveredTs || o.finalStatus !== "in_progress").length, pickup.length)),
       avgLeadtimeH: round1(avgE2eLT * 0.4),
-      failCount: 0,
+      cutoffRate: cutoffKtcDi,
     },
     {
       groupKey: "giao",
@@ -1163,7 +1180,7 @@ export function getJourneyStatusGroups(filter: FilterState): StatusGroupRow[] {
       total: delivered.length + returned.length + inProgress.length,
       successRate: round1(pct(delivered.length, delivered.length + returned.length + inProgress.length || 1)),
       avgLeadtimeH: round1(avgE2eLT * 0.5),
-      failCount: returned.length + lostExc.length,
+      cutoffRate: cutoffDeliv,
     },
     {
       groupKey: "ktc-ve",
@@ -1171,7 +1188,7 @@ export function getJourneyStatusGroups(filter: FilterState): StatusGroupRow[] {
       total: returned.length,
       successRate: round1(pct(returned.length, returned.length || 1) * 0.95),
       avgLeadtimeH: round1(avgE2eLT * 0.3),
-      failCount: lostExc.length,
+      cutoffRate: cutoffKtcVe,
     },
     {
       groupKey: "tra",
@@ -1179,7 +1196,7 @@ export function getJourneyStatusGroups(filter: FilterState): StatusGroupRow[] {
       total: returned.length,
       successRate: 92,
       avgLeadtimeH: round1(avgE2eLT * 0.25),
-      failCount: lostExc.length,
+      cutoffRate: cutoffTra,
     },
   ];
 }
@@ -2779,57 +2796,95 @@ export function getJourneySankey(filter: FilterState): SankeyData {
   const exception = orders.filter((o) => o.finalStatus === "exception").length;
   const inProgress = orders.filter((o) => o.finalStatus === "in_progress").length;
 
-  // node index
+  // Đơn đến được chặng giao = mọi outcome sau khi đã lấy (≈ picked).
+  const reachedDelivery =
+    delivered + gtb + retSucc + retFail + lost + exception + inProgress;
+  // Đơn phát thất bại lần đầu (rồi rẽ nhánh hoàn/thất lạc/exception/GTB cuối).
+  const phatThatBai = gtb + retSucc + retFail + lost + exception;
+  // Đơn vào quy trình lưu kho chờ hoàn → trả người gửi.
+  const hoanHang = retSucc + retFail;
+  // Lấy thất bại = không lấy được & không phải huỷ.
+  const pickFailed = Math.max(0, total - picked - cancelled);
+
+  // node index — luồng theo state machine: tạo → lấy → KTC đi → linehaul →
+  // KTC đích → BC giao → phát → (GTC | phát thất bại | đang xử lý) →
+  // (GTB | hoàn | thất lạc | exception) → (trả TC | trả TB)
   const N = {
     tao: 0,
     daLay: 1,
     huy: 2,
-    nhapKtc: 3,
-    bcGiao: 4,
-    giaoTC: 5,
-    giaoTB: 6,
-    traTC: 7,
-    traTB: 8,
-    thatLac: 9,
-    dangXuLy: 10,
+    layThatBai: 3,
+    phanLoai: 4,
+    lineHaul: 5,
+    nhapKtc: 6,
+    veBc: 7,
+    dangPhat: 8,
+    giaoTC: 9,
+    phatTB: 10,
+    dangXuLy: 11,
+    luuKho: 12,
+    giaoTBCuoi: 13,
+    traTC: 14,
+    traTB: 15,
+    thatLac: 16,
+    exception: 17,
   };
   const nodes = [
     { name: "Tạo đơn" },
-    { name: "Đã lấy" },
-    { name: "Huỷ" },
-    { name: "Nhập KTC" },
-    { name: "Tại BC giao" },
+    { name: "Đã lấy hàng" },
+    { name: "Huỷ đơn" },
+    { name: "Lấy thất bại" },
+    { name: "Phân loại KTC đi" },
+    { name: "Vận chuyển liên vùng" },
+    { name: "Nhập KTC đích" },
+    { name: "Về BC giao" },
+    { name: "Đang phát" },
     { name: "Giao thành công" },
-    { name: "Giao thất bại" },
+    { name: "Phát thất bại" },
+    { name: "Đang xử lý" },
+    { name: "Lưu kho / chờ hoàn" },
+    { name: "Giao thất bại (GTB)" },
     { name: "Trả thành công" },
     { name: "Trả thất bại" },
-    { name: "Thất lạc / Exception" },
-    { name: "Đang xử lý" },
+    { name: "Thất lạc" },
+    { name: "Exception" },
   ];
 
-  // flows
-  const atKtc = Math.round(picked * 0.99);
-  const atBcGiao = Math.round(atKtc * 0.98);
+  // Backbone sau khi lấy — hao hụt nhẹ qua từng chặng trung chuyển.
+  const atPhanLoai = picked;
+  const atLineHaul = Math.round(picked * 0.997);
+  const atNhapKtc = Math.round(picked * 0.992);
+  const atVeBc = Math.round(picked * 0.986);
+
+  const mk = (source: number, target: number, value: number) => ({
+    source,
+    target,
+    value: Math.max(1, value),
+  });
 
   const links = [
-    { source: N.tao, target: N.daLay, value: Math.max(1, picked) },
-    { source: N.tao, target: N.huy, value: Math.max(1, cancelled) },
-    { source: N.daLay, target: N.nhapKtc, value: Math.max(1, atKtc) },
-    { source: N.nhapKtc, target: N.bcGiao, value: Math.max(1, atBcGiao) },
-    { source: N.bcGiao, target: N.giaoTC, value: Math.max(1, delivered) },
-    {
-      source: N.bcGiao,
-      target: N.giaoTB,
-      value: Math.max(1, gtb + retSucc + retFail),
-    },
-    { source: N.bcGiao, target: N.dangXuLy, value: Math.max(1, inProgress) },
-    { source: N.giaoTB, target: N.traTC, value: Math.max(1, retSucc) },
-    { source: N.giaoTB, target: N.traTB, value: Math.max(1, retFail) },
-    {
-      source: N.giaoTB,
-      target: N.thatLac,
-      value: Math.max(1, lost + exception),
-    },
+    // Chặng tạo → lấy
+    mk(N.tao, N.daLay, picked),
+    mk(N.tao, N.huy, cancelled),
+    mk(N.tao, N.layThatBai, pickFailed),
+    // Chặng trung chuyển (KTC + linehaul)
+    mk(N.daLay, N.phanLoai, atPhanLoai),
+    mk(N.phanLoai, N.lineHaul, atLineHaul),
+    mk(N.lineHaul, N.nhapKtc, atNhapKtc),
+    mk(N.nhapKtc, N.veBc, atVeBc),
+    mk(N.veBc, N.dangPhat, reachedDelivery),
+    // Chặng giao
+    mk(N.dangPhat, N.giaoTC, delivered),
+    mk(N.dangPhat, N.phatTB, phatThatBai),
+    mk(N.dangPhat, N.dangXuLy, inProgress),
+    // Rẽ nhánh sau khi phát thất bại
+    mk(N.phatTB, N.giaoTBCuoi, gtb),
+    mk(N.phatTB, N.luuKho, hoanHang),
+    mk(N.phatTB, N.thatLac, lost),
+    mk(N.phatTB, N.exception, exception),
+    // Chặng hoàn
+    mk(N.luuKho, N.traTC, retSucc),
+    mk(N.luuKho, N.traTB, retFail),
   ];
 
   void total;

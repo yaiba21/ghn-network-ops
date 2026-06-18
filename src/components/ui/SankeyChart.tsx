@@ -15,19 +15,30 @@ type Props = {
   height?: number;
 };
 
-// Màu node theo loại (success xanh, fail đỏ, neutral xám/cam)
+// Màu node theo loại (success xanh, fail đỏ, neutral xám/cam, trung chuyển tím)
 const NODE_COLOR: Record<string, string> = {
+  // Đầu vào / lấy hàng
   "Tạo đơn": "#1F2937",
-  "Đã lấy": "#0EA5E9",
-  Huỷ: "#9CA3AF",
-  "Nhập KTC": "#8B5CF6",
-  "Tại BC giao": "#F59E0B",
+  "Đã lấy hàng": "#0EA5E9",
+  "Huỷ đơn": "#9CA3AF",
+  "Lấy thất bại": "#F87171",
+  // Trung chuyển KTC + linehaul
+  "Phân loại KTC đi": "#8B5CF6",
+  "Vận chuyển liên vùng": "#6366F1",
+  "Nhập KTC đích": "#7C3AED",
+  "Về BC giao": "#F59E0B",
+  // Giao hàng
+  "Đang phát": "#FB923C",
   "Giao thành công": "#10B981",
-  "Giao thất bại": "#EF4444",
+  "Phát thất bại": "#EF4444",
+  "Đang xử lý": "#9CA3AF",
+  // Hoàn / exception
+  "Lưu kho / chờ hoàn": "#D97706",
+  "Giao thất bại (GTB)": "#DC2626",
   "Trả thành công": "#F59E0B",
   "Trả thất bại": "#B91C1C",
-  "Thất lạc / Exception": "#7F1D1D",
-  "Đang xử lý": "#9CA3AF",
+  "Thất lạc": "#7F1D1D",
+  Exception: "#A855F7",
 };
 
 type NodeProps = {

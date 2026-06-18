@@ -5,7 +5,6 @@ import { useFilter } from "@/components/filter/FilterContext";
 import {
   getJourneyAlerts,
   getJourneyFinalStatusMix,
-  getJourneyPercentiles,
   getJourneySankey,
   getJourneyStatusGroups,
   getJourneyTopOrders,
@@ -21,7 +20,6 @@ import {
   cn,
   formatCompactInt,
   formatHours,
-  formatInt,
   formatPct,
   formatVNDate,
 } from "@/lib/utils";
@@ -37,7 +35,6 @@ export default function JourneyPage() {
   const { filter } = useFilter();
 
   const groups = useMemo(() => getJourneyStatusGroups(filter), [filter]);
-  const percentiles = useMemo(() => getJourneyPercentiles(filter), [filter]);
   const finalMix = useMemo(() => getJourneyFinalStatusMix(filter), [filter]);
   const topOrders = useMemo(() => getJourneyTopOrders(filter, 30), [filter]);
   const sankey = useMemo(() => getJourneySankey(filter), [filter]);
@@ -54,7 +51,7 @@ export default function JourneyPage() {
           { label: "Hành Trình Đơn Hàng" },
         ]}
         title="Hành Trình Đơn Hàng — theo trạng thái"
-        subtitle="6 nhóm trạng thái từ tạo đơn đến giao thành công (hoặc hoàn / huỷ / thất lạc). Lead time percentile heatmap + drill xuống MVĐ."
+        subtitle="Theo dõi performance theo hành trình đơn hàng"
         updatedAt={updated}
       />
 
@@ -74,36 +71,28 @@ export default function JourneyPage() {
       {/* === Bảng 6 nhóm trạng thái + metrics === */}
       <Card
         title="Bảng trạng thái đơn hàng"
-        subtitle={`${formatCompactInt(totalOrders)} đơn qua 6 chặng. Mỗi nhóm trạng thái: số lượng · % thành công · lead time TB · số đơn fail.`}
+        subtitle={`${formatCompactInt(totalOrders)} đơn qua 6 chặng. Mỗi nhóm trạng thái: số lượng · % thành công · lead time TB · tỷ lệ đúng cut-off.`}
       >
         <StatusGroupTable groups={groups} />
       </Card>
 
-      {/* === Sankey flow đơn === */}
+      {/* === Sankey flow đơn (luồng trạng thái đầy đủ) === */}
       <Card
         title="Sankey — luồng đơn theo trạng thái"
-        subtitle="Độ dày luồng = số đơn. Tạo đơn → Lấy → KTC → BC giao → GTC / Thất bại → Trả / Thất lạc."
+        subtitle="Độ dày luồng = số đơn. Tạo đơn → Lấy → Phân loại KTC → Linehaul → BC giao → Phát → GTC / Phát thất bại → Hoàn / Thất lạc / Exception."
       >
-        <SankeyChart data={sankey} height={440} />
+        <SankeyChart data={sankey} height={560} />
       </Card>
 
-      {/* === 8 outcome card (6 terminal + cancelled + in_progress) === */}
+      {/* === Các final status của đơn hàng === */}
       <Card
-        title="8 outcome cuối — 6 terminal + 2 trạng thái khác"
-        subtitle="Phân bổ kết quả cuối cùng của đơn. Đỏ = exception/lost/failed → cần investigate."
+        title="Các final status của đơn hàng"
+        subtitle="Kết quả cuối của đơn hàng"
       >
         <FinalStatusGrid mix={finalMix} />
       </Card>
 
-      {/* === Percentile heatmap === */}
-      <Card
-        title="Lead Time Percentile — Heatmap"
-        subtitle="P50 (50% đơn dưới giá trị này) · P90 · P99. Cell màu đỏ = vượt ngưỡng cảnh báo."
-      >
-        <PercentileHeatmap rows={percentiles} />
-      </Card>
-
-      {/* === Drill MVĐ === */}
+      {/* === Drill down xuống đơn hàng === */}
       <OrdersDrillTable rows={topOrders} />
     </div>
   );
@@ -161,14 +150,22 @@ function StatusGroupTable({
       render: (r) => (r.avgLeadtimeH > 0 ? formatHours(r.avgLeadtimeH) : "—"),
     },
     {
-      key: "failCount",
-      label: "Số đơn fail",
+      key: "cutoffRate",
+      label: "Tỷ lệ đúng cut-off",
       align: "right",
       sortable: true,
-      sortValue: (r) => r.failCount,
+      sortValue: (r) => r.cutoffRate,
       render: (r) => (
-        <span className={r.failCount === 0 ? "text-[var(--color-text-muted)]" : "text-red-600"}>
-          {formatCompactInt(r.failCount)}
+        <span
+          className={
+            r.cutoffRate >= 90
+              ? "text-emerald-600"
+              : r.cutoffRate >= 80
+                ? "text-amber-600"
+                : "text-red-600"
+          }
+        >
+          {formatPct(r.cutoffRate, 1)}
         </span>
       ),
     },
@@ -218,81 +215,7 @@ function FinalStatusGrid({
 }
 
 // =============================================================================
-// Percentile heatmap
-// =============================================================================
-
-function PercentileHeatmap({
-  rows,
-}: {
-  rows: ReturnType<typeof getJourneyPercentiles>;
-}) {
-  // Ngưỡng đèn giao thông cho mỗi metric (phút hoặc h).
-  const thresholds: Record<string, { green: number; amber: number; unit: string }> = {
-    "Time 1 (scan đơn đầu)": { green: 15, amber: 25, unit: "'" },
-    "Time 2 (kết thúc phiên)": { green: 20, amber: 30, unit: "'" },
-    "Lead time E2E": { green: 36, amber: 60, unit: "h" },
-  };
-
-  const cellColor = (value: number, threshold: { green: number; amber: number }) => {
-    if (value <= threshold.green)
-      return "bg-emerald-100 text-emerald-900 border-emerald-200";
-    if (value <= threshold.amber)
-      return "bg-amber-100 text-amber-900 border-amber-200";
-    return "bg-red-100 text-red-900 border-red-200";
-  };
-
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm border-separate border-spacing-1">
-        <thead>
-          <tr>
-            <th className="text-left text-[11px] uppercase tracking-wide text-[var(--color-text-muted)] font-medium px-2 py-1">
-              Chỉ số
-            </th>
-            {(["P50", "P90", "P99"] as const).map((p) => (
-              <th
-                key={p}
-                className="text-center text-[11px] uppercase tracking-wide text-[var(--color-text-muted)] font-medium px-2 py-1"
-              >
-                {p}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => {
-            const t = thresholds[r.metric] ?? { green: 999, amber: 9999, unit: r.unit };
-            return (
-              <tr key={r.metric}>
-                <td className="px-2 py-2 text-sm font-medium">{r.metric}</td>
-                {[r.p50, r.p90, r.p99].map((v, i) => (
-                  <td
-                    key={i}
-                    className={cn(
-                      "px-3 py-2 text-center tabular-nums font-semibold border rounded",
-                      cellColor(v, t),
-                    )}
-                  >
-                    {formatInt(v)}
-                    {r.unit === "h" ? "h" : "'"}
-                  </td>
-                ))}
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-      <div className="text-[10px] text-[var(--color-text-muted)] mt-2 flex gap-3">
-        <span><span className="inline-block w-2 h-2 bg-emerald-500 rounded mr-1" />Đạt mục tiêu</span>
-        <span><span className="inline-block w-2 h-2 bg-amber-500 rounded mr-1" />Cảnh báo</span>
-        <span><span className="inline-block w-2 h-2 bg-red-500 rounded mr-1" />Vượt ngưỡng</span>
-      </div>
-    </div>
-  );
-}
-
-// =============================================================================
-// Drill MVĐ table
+// Drill down xuống đơn hàng
 // =============================================================================
 
 function OrdersDrillTable({
@@ -373,8 +296,8 @@ function OrdersDrillTable({
   ];
   return (
     <Card
-      title="Drill xuống MVĐ — Top 30 đơn gần nhất"
-      subtitle="Click cột để sort. Xem MVĐ cụ thể để truy trace pattern lỗi."
+      title="Drill down xuống đơn hàng"
+      subtitle="Click cột để sort, hoặc search mã vận đơn (Order ID)"
     >
       <DataTable
         columns={cols}
