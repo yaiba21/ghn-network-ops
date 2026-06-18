@@ -107,9 +107,9 @@ export default function NetworkPage() {
       <PageHeader
         breadcrumb={[
           { label: "GHN Network Ops", href: "/" },
-          { label: "Mạng Lưới" },
+          { label: "Mạng lưới BC" },
         ]}
-        title="Mạng Lưới (Network Design & Linehaul)"
+        title="Mạng lưới BC (Hub Network)"
         subtitle="Sức khoẻ middle-mile: lượng đơn KTC, SLA Network, cost/kg, fill rate xe. Bấm vùng để drill xuống BC."
         updatedAt={updated}
       />

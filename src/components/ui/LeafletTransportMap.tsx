@@ -10,7 +10,7 @@ import {
 } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import type { MapNode, MapTripRoute } from "@/lib/aggregators";
-import { cn, formatCompactInt } from "@/lib/utils";
+import { cn, formatCompactInt, formatVND } from "@/lib/utils";
 import { fetchRoadPath, mapWithLimit } from "@/lib/osrm";
 
 const ROUTE_COLOR: Record<string, string> = {
@@ -28,11 +28,15 @@ export function LeafletTransportMap({
   routes: MapTripRoute[];
   height?: number;
 }) {
-  const [activeTrip, setActiveTrip] = useState<string | null>(null);
+  const [activeTrip, setActiveTrip] = useState<string | null>(null); // hover (highlight tạm)
+  const [selectedTrip, setSelectedTrip] = useState<string | null>(null); // click (giữ + xem chi tiết)
   // Hình học đường bộ (OSRM) theo tripId — fallback đường thẳng nếu chưa/không có.
   const [roadPaths, setRoadPaths] = useState<Record<string, [number, number][]>>({});
   const center: [number, number] = [16.0, 107.5]; // giữa VN
   const maxTp = Math.max(1, ...nodes.map((n) => n.throughput));
+  // Tuyến đang focus = đang hover, nếu không thì tuyến đã click.
+  const focusTrip = activeTrip ?? selectedTrip;
+  const selected = routes.find((r) => r.tripId === selectedTrip);
 
   // Tải hình học đường bộ cho từng route (bám đường, nằm trong đất liền VN).
   useEffect(() => {
@@ -71,8 +75,8 @@ export function LeafletTransportMap({
             />
             {/* Routes — đường bộ thực tế (OSRM), fallback nối điểm chạm */}
             {routes.map((r) => {
-              const dim = activeTrip && activeTrip !== r.tripId;
-              const isSel = activeTrip === r.tripId;
+              const dim = focusTrip && focusTrip !== r.tripId;
+              const isSel = focusTrip === r.tripId;
               const line: [number, number][] =
                 roadPaths[r.tripId] ?? r.stops.map((s) => [s.lat, s.lng]);
               return (
@@ -85,14 +89,14 @@ export function LeafletTransportMap({
                     opacity: dim ? 0.12 : 0.7,
                     dashArray: isSel ? undefined : "5 6",
                   }}
-                  eventHandlers={{ click: () => setActiveTrip(r.tripId) }}
+                  eventHandlers={{ click: () => setSelectedTrip(r.tripId) }}
                 />
               );
             })}
-            {/* Stop points của route đang chọn */}
-            {activeTrip &&
+            {/* Stop points của route đang focus */}
+            {focusTrip &&
               routes
-                .find((r) => r.tripId === activeTrip)
+                .find((r) => r.tripId === focusTrip)
                 ?.stops.map((s) => (
                   <CircleMarker
                     key={s.code + s.order}
@@ -145,41 +149,138 @@ export function LeafletTransportMap({
         </div>
       </div>
 
-      {/* Route list */}
-      <div className="xl:w-72 shrink-0">
-        <div className="text-[11px] uppercase tracking-wide text-[var(--color-text-muted)] mb-2">
-          {routes.length} tuyến — hover để xem điểm chạm
+      {/* Panel: chi tiết tuyến đã chọn + danh sách tuyến */}
+      <div className="xl:w-80 shrink-0 space-y-3">
+        {selected && <RouteDetail route={selected} onClose={() => setSelectedTrip(null)} />}
+
+        <div>
+          <div className="text-[11px] uppercase tracking-wide text-[var(--color-text-muted)] mb-2">
+            {routes.length} tuyến — hover để xem, bấm để hiện chi tiết
+          </div>
+          <div className="space-y-1 max-h-[420px] overflow-auto pr-1">
+            {routes.map((r) => (
+              <button
+                key={r.tripId}
+                type="button"
+                onMouseEnter={() => setActiveTrip(r.tripId)}
+                onMouseLeave={() => setActiveTrip(null)}
+                onClick={() => setSelectedTrip(r.tripId)}
+                className={cn(
+                  "w-full px-2.5 py-2 rounded border text-xs text-left transition-colors",
+                  selectedTrip === r.tripId
+                    ? "border-[var(--color-ghn-red)] bg-[var(--color-row-selected)]"
+                    : activeTrip === r.tripId
+                      ? "border-[var(--color-ghn-red)]"
+                      : "border-[var(--color-border)] hover:bg-[var(--color-hover)]",
+                )}
+              >
+                <div className="flex items-center gap-2">
+                  <span
+                    className="w-2 h-2 rounded-full shrink-0"
+                    style={{ backgroundColor: ROUTE_COLOR[r.status] }}
+                  />
+                  <span className="font-mono text-[10px] truncate">{r.tripId.slice(-10)}</span>
+                  <span className="ml-auto text-[10px] text-[var(--color-text-muted)]">
+                    {r.stops.length} điểm
+                  </span>
+                </div>
+                <div className="text-[10px] text-[var(--color-text-muted)] mt-0.5 truncate">
+                  {r.stops.map((s) => s.code.replace("-KTC", "·").replace("BC-", "")).join(" → ")}
+                </div>
+              </button>
+            ))}
+          </div>
         </div>
-        <div className="space-y-1 max-h-[520px] overflow-auto pr-1">
-          {routes.map((r) => (
-            <button
-              key={r.tripId}
-              type="button"
-              onMouseEnter={() => setActiveTrip(r.tripId)}
-              onMouseLeave={() => setActiveTrip(null)}
-              className={cn(
-                "w-full px-2.5 py-2 rounded border text-xs text-left transition-colors",
-                activeTrip === r.tripId
-                  ? "border-[var(--color-ghn-red)] bg-[var(--color-row-selected)]"
-                  : "border-[var(--color-border)] hover:bg-[var(--color-hover)]",
-              )}
-            >
-              <div className="flex items-center gap-2">
-                <span
-                  className="w-2 h-2 rounded-full shrink-0"
-                  style={{ backgroundColor: ROUTE_COLOR[r.status] }}
-                />
-                <span className="font-mono text-[10px] truncate">{r.tripId.slice(-10)}</span>
-                <span className="ml-auto text-[10px] text-[var(--color-text-muted)]">
-                  {r.stops.length} điểm
-                </span>
-              </div>
-              <div className="text-[10px] text-[var(--color-text-muted)] mt-0.5 truncate">
-                {r.stops.map((s) => s.code.replace("-KTC", "·").replace("BC-", "")).join(" → ")}
-              </div>
-            </button>
+      </div>
+    </div>
+  );
+}
+
+// Thẻ thông tin tuyến khi click trên bản đồ / danh sách.
+function RouteDetail({
+  route,
+  onClose,
+}: {
+  route: MapTripRoute;
+  onClose: () => void;
+}) {
+  const lateLabel =
+    route.lateMin <= 15
+      ? "Đến đúng giờ"
+      : `Trễ ${route.lateMin}'`;
+  const lateColor =
+    route.lateMin <= 15
+      ? "text-emerald-600"
+      : route.lateMin <= 60
+        ? "text-amber-600"
+        : "text-red-600";
+  return (
+    <div className="border border-[var(--color-border)] rounded-md p-3 bg-white">
+      <div className="flex items-start gap-2">
+        <span
+          className="mt-1 w-2.5 h-2.5 rounded-full shrink-0"
+          style={{ backgroundColor: ROUTE_COLOR[route.status] }}
+        />
+        <div className="min-w-0">
+          <div className="text-xs font-semibold text-[var(--color-text)] truncate">
+            {route.origin} → {route.dest}
+          </div>
+          <div className="text-[10px] text-[var(--color-text-muted)] font-mono">
+            {route.tripId} · {route.type}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="ml-auto text-[var(--color-text-muted)] hover:text-[var(--color-text)] text-xs leading-none"
+          aria-label="Đóng"
+        >
+          ✕
+        </button>
+      </div>
+
+      <div className="mt-2.5 grid grid-cols-2 gap-2">
+        <RStat label="Parcels" value={formatCompactInt(route.parcels)} />
+        <RStat label="Tổng km" value={`${route.totalKm} km`} />
+        <RStat label="Chi phí" value={formatVND(route.cost, true)} />
+        <RStat label="Cost/km" value={formatVND(route.costPerKm)} />
+        <RStat label="Fill kg" value={`${route.fillRateKg}%`} />
+        <RStat label="Số điểm chạm" value={`${route.stops.length}`} />
+        <RStat label="NCC" value={route.carrier} />
+        <RStat label="Xe" value={route.vehicle} />
+      </div>
+
+      <div className={cn("mt-2 text-xs font-medium", lateColor)}>{lateLabel}</div>
+
+      <div className="mt-2 pt-2 border-t border-[var(--color-border-soft)]">
+        <div className="text-[10px] uppercase tracking-wide text-[var(--color-text-muted)] mb-1">
+          Chuỗi điểm chạm
+        </div>
+        <ol className="space-y-1">
+          {route.stops.map((s) => (
+            <li key={s.code + s.order} className="flex items-center gap-1.5 text-[11px]">
+              <span
+                className="w-1.5 h-1.5 rounded-full shrink-0"
+                style={{ backgroundColor: s.code.startsWith("BC-") ? "#10b981" : "#8b5cf6" }}
+              />
+              <span className="text-[var(--color-text-muted)] tabular-nums">{s.order}.</span>
+              <span className="truncate">{s.label}</span>
+            </li>
           ))}
-        </div>
+        </ol>
+      </div>
+    </div>
+  );
+}
+
+function RStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="bg-[var(--color-hover)] rounded p-1.5">
+      <div className="text-[9px] uppercase tracking-wide text-[var(--color-text-muted)] truncate">
+        {label}
+      </div>
+      <div className="text-xs font-semibold tabular-nums text-[var(--color-text)] truncate">
+        {value}
       </div>
     </div>
   );

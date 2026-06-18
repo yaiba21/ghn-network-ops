@@ -58,9 +58,9 @@ export default function RoutingPage() {
       <PageHeader
         breadcrumb={[
           { label: "GHN Network Ops", href: "/" },
-          { label: "Định Tuyến" },
+          { label: "Gán đơn" },
         ]}
-        title="Định Tuyến (Order Allocation)"
+        title="Gán đơn (Order Allocation)"
         subtitle="Phân tuyến đơn theo channel + sort code + KTC. 3 metric đổi kho phân biệt mẫu số, so sánh theo vùng + BC."
         updatedAt={updated}
       />

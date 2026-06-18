@@ -82,9 +82,9 @@ export default function TransportPage() {
       <PageHeader
         breadcrumb={[
           { label: "GHN Network Ops", href: "/" },
-          { label: "Vận Tải" },
+          { label: "Định tuyến" },
         ]}
-        title="Vận Tải (Trip & Fleet)"
+        title="Định tuyến (Routing & Transportation)"
         subtitle="Chuyến xe realtime, fill rate, NCC, sức khoẻ tuyến. 1 tuyến gồm nhiều trip — lọc theo mã tuyến."
         updatedAt={updated}
       />

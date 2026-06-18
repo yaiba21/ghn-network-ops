@@ -3232,6 +3232,18 @@ export type MapTripRoute = {
   tripId: string;
   stops: MapStop[];
   status: Status;
+  // Tóm tắt tuyến (hiện khi click route trên bản đồ)
+  type: string;
+  origin: string;
+  dest: string;
+  parcels: number;
+  totalKm: number;
+  cost: number;
+  costPerKm: number;
+  carrier: string;
+  vehicle: string;
+  fillRateKg: number;
+  lateMin: number;
 };
 
 function geoOf(code: string): { lat: number; lng: number } | null {
@@ -3280,6 +3292,8 @@ export function getTransportMap(
     .map((t) => {
       const detail = getTripDetail(t.tripId);
       if (!detail || detail.stops.length < 2) return null;
+      const first = detail.stops[0];
+      const last = detail.stops[detail.stops.length - 1];
       return {
         tripId: t.tripId,
         status: detail.status,
@@ -3290,6 +3304,17 @@ export function getTransportMap(
           order: s.order,
           label: s.name,
         })),
+        type: detail.type,
+        origin: first.name,
+        dest: last.name,
+        parcels: detail.parcels,
+        totalKm: detail.totalKm,
+        cost: detail.cost,
+        costPerKm: detail.costPerKm,
+        carrier: detail.carrier,
+        vehicle: detail.vehicle,
+        fillRateKg: detail.fillRateKg,
+        lateMin: detail.lateMin,
       };
     })
     .filter((r): r is MapTripRoute => r !== null);

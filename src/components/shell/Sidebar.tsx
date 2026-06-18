@@ -30,9 +30,9 @@ type NavItem = {
 const NAV: NavItem[] = [
   { label: "Tổng Quan", href: "/", icon: LayoutDashboard },
   { label: "Hành Trình Đơn", href: "/journey", icon: PackageSearch },
-  { label: "Định Tuyến (Order Allocation)", href: "/routing", icon: Route },
-  { label: "Mạng Lưới (Network Design & Linehaul)", href: "/network", icon: Truck },
-  { label: "Vận Tải (Trip & Fleet)", href: "/transport", icon: Bus },
+  { label: "Gán đơn", href: "/routing", icon: Route },
+  { label: "Mạng lưới BC", href: "/network", icon: Truck },
+  { label: "Định tuyến", href: "/transport", icon: Bus },
   {
     label: "Báo cáo",
     icon: BarChart3,
