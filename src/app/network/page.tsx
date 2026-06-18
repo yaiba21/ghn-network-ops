@@ -11,7 +11,7 @@ import {
   getNetworkAlerts,
   getNetworkSubMetricsByRegion,
   getLaneMatrix,
-  getOverviewNorthStar,
+  getNetworkKeyMetrics,
   getRegionScorecard,
   getTerritoryMap,
 } from "@/lib/aggregators";
@@ -52,7 +52,7 @@ import {
 export default function NetworkPage() {
   const { filter } = useFilter();
 
-  const northStar = useMemo(() => getOverviewNorthStar(filter), [filter]);
+  const keyMetrics = useMemo(() => getNetworkKeyMetrics(filter), [filter]);
   const regionScorecard = useMemo(() => getRegionScorecard(filter), [filter]);
   const ktcScorecard = useMemo(() => getKtcScorecard(filter), [filter]);
   const subMetricsByRegion = useMemo(
@@ -126,12 +126,16 @@ export default function NetworkPage() {
 
       {alerts.length > 0 && <AlertBanner alerts={alerts} />}
 
-      {/* === KPI mạng (bỏ đổi kho) === */}
-      <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-        <KpiCardFrom kpi={northStar.ontimeNetwork} size="sm" />
-        <KpiCardFrom kpi={northStar.hangVeBc4Ca} size="sm" />
-        <KpiCardFrom kpi={northStar.costPerKg} size="sm" />
-        <KpiCardFrom kpi={northStar.ontimeVanTai} size="sm" />
+      {/* === Key metrics toàn mạng === */}
+      <section>
+        <div className="text-[11px] uppercase tracking-wide text-[var(--color-text-muted)] mb-2">
+          Key metrics — {keyMetrics.length} chỉ số mạng lưới BC
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+          {keyMetrics.map((m) => (
+            <KpiCardFrom key={m.label} kpi={m} size="sm" />
+          ))}
+        </div>
       </section>
 
       {/* === Scorecard 14 vùng (clickable) === */}

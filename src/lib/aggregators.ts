@@ -25,6 +25,8 @@ import type {
   FilterState,
   FinalStatus,
   HeatmapData,
+  KpiDirection,
+  KpiUnit,
   KpiValue,
   RegionCode,
   Status,
@@ -1976,6 +1978,210 @@ export type RegionScorecardRow = {
   bcgLateSla: number; // % đơn về BC giao trễ/cận SLA (<1 ca buffer)
 };
 
+// Build KpiValue thủ công (cho metric không nằm trong KPI registry).
+function makeKpi(opts: {
+  label: string;
+  value: number;
+  unit: KpiUnit;
+  direction: KpiDirection;
+  target: number;
+  thresholds: [number, number]; // [green, amber]
+  definition: string;
+  sparkline: number[];
+  prevValue?: number;
+}): KpiValue {
+  const { label, value, unit, direction, target, thresholds, definition, sparkline, prevValue } = opts;
+  const [a, b] = thresholds;
+  const status: Status =
+    direction === "higher-better"
+      ? value >= a
+        ? "green"
+        : value >= b
+          ? "amber"
+          : "red"
+      : value <= a
+        ? "green"
+        : value <= b
+          ? "amber"
+          : "red";
+  const deltaPct =
+    prevValue && prevValue !== 0 ? round1(((value - prevValue) / prevValue) * 100) : 0;
+  return { label, value, unit, target, deltaPct, sparkline, status, direction, definition };
+}
+
+/**
+ * Key metrics toàn mạng (network-level) cho trang Mạng lưới BC.
+ * Cùng định nghĩa với cột scorecard 14 vùng để card + bảng nhất quán.
+ */
+export function getNetworkKeyMetrics(filter: FilterState): KpiValue[] {
+  const orders = filterOrders(filter);
+  const orderIds = new Set(orders.map((o) => o.orderId));
+  const trips = filterTrips(filter);
+  const pickups = filterPickups(filter, orderIds);
+
+  const oprOf = (os: FactOrder[]) =>
+    round1(pct(os.filter((o) => o.pickedTs).length, os.length || 1));
+  const odrOf = (os: FactOrder[]) =>
+    round1(pct(os.filter((o) => o.deliveredTs).length, os.length || 1));
+  const longtailOf = (os: FactOrder[]) =>
+    round1(pct(os.filter((o) => o.shopSizeBucket === "small").length, os.length || 1));
+  const bcgOf = (os: FactOrder[]) => {
+    const fin = os.filter((o) => o.deliveredTs);
+    return fin.length
+      ? round1(
+          pct(
+            fin.filter(
+              (o) =>
+                new Date(o.promisedTs).getTime() - new Date(o.deliveredTs!).getTime() <
+                5 * 3600 * 1000,
+            ).length,
+            fin.length,
+          ),
+        )
+      : 0;
+  };
+  const ganOf = (f: FilterState) => {
+    const os = filterOrders(f);
+    return computePctDaGan(filterPickups(f, new Set(os.map((o) => o.orderId))));
+  };
+  const gtcGanOf = (f: FilterState) => {
+    const os = filterOrders(f);
+    const ids = new Set(os.map((o) => o.orderId));
+    const pk = filterPickups(f, ids);
+    return computePctTc(new Set(pk.filter((p) => p.assigned).map((p) => p.orderId)));
+  };
+
+  const assignedIds = new Set(pickups.filter((p) => p.assigned).map((p) => p.orderId));
+
+  const prevOf = (arr: number[]) =>
+    arr.slice(0, 3).reduce((a, b) => a + b, 0) / 3;
+  const sp = (fn: (f: FilterState) => number) => sparkline7Days(filter, fn);
+
+  const spOpr = sp((f) => oprOf(filterOrders(f)));
+  const spOdr = sp((f) => odrOf(filterOrders(f)));
+  const spTC = sp((f) => computeOntimeNetwork(filterOrders(f)));
+  const spGan = sp(ganOf);
+  const spGtcGan = sp(gtcGanOf);
+  const spLong = sp((f) => longtailOf(filterOrders(f)));
+  const spBcg = sp((f) => bcgOf(filterOrders(f)));
+  const spHang = sp((f) => computeHangVeBc4Ca(filterOrders(f)));
+  const spCpk = sp((f) => computeCostPerKg(filterTrips(f)));
+  const spOvt = sp((f) => computeOntimeVanTai(filterTrips(f)));
+
+  return [
+    makeKpi({
+      label: "OPR — Tỷ lệ lấy hàng",
+      value: oprOf(orders),
+      unit: "%",
+      direction: "higher-better",
+      target: 97,
+      thresholds: [97, 93],
+      definition: "OPR (order pickup rate) = đơn đã lấy / tổng đơn.",
+      sparkline: spOpr,
+      prevValue: prevOf(spOpr),
+    }),
+    makeKpi({
+      label: "ODR — Tỷ lệ giao hàng",
+      value: odrOf(orders),
+      unit: "%",
+      direction: "higher-better",
+      target: 93,
+      thresholds: [93, 88],
+      definition: "ODR (order delivery rate) = đơn đã giao / tổng đơn.",
+      sparkline: spOdr,
+      prevValue: prevOf(spOdr),
+    }),
+    makeKpi({
+      label: "Ontime TC",
+      value: computeOntimeNetwork(orders),
+      unit: "%",
+      direction: "higher-better",
+      target: 92,
+      thresholds: [92, 88],
+      definition: "Tỷ lệ giao thành công đúng giờ = đơn GTC giao ≤ hẹn / đơn GTC.",
+      sparkline: spTC,
+      prevValue: prevOf(spTC),
+    }),
+    makeKpi({
+      label: "% gán",
+      value: computePctDaGan(pickups),
+      unit: "%",
+      direction: "higher-better",
+      target: 88,
+      thresholds: [88, 80],
+      definition: "Tỷ lệ đơn được gán/chỉ định kho = đơn đã gán / tổng cần lấy.",
+      sparkline: spGan,
+      prevValue: prevOf(spGan),
+    }),
+    makeKpi({
+      label: "%GTC trên gán",
+      value: computePctTc(assignedIds),
+      unit: "%",
+      direction: "higher-better",
+      target: 92,
+      thresholds: [92, 88],
+      definition: "Tỷ lệ giao thành công tính trên số đơn đã được gán.",
+      sparkline: spGtcGan,
+      prevValue: prevOf(spGtcGan),
+    }),
+    makeKpi({
+      label: "% Longtail",
+      value: longtailOf(orders),
+      unit: "%",
+      direction: "lower-better",
+      target: 30,
+      thresholds: [30, 45],
+      definition: "Tỷ lệ đơn ở khu vực xa/khó (đuôi dài) — proxy theo shop nhỏ.",
+      sparkline: spLong,
+      prevValue: prevOf(spLong),
+    }),
+    makeKpi({
+      label: "% BCG trễ SLA",
+      value: bcgOf(orders),
+      unit: "%",
+      direction: "lower-better",
+      target: 10,
+      thresholds: [10, 20],
+      definition: "Tỷ lệ BC giao trễ/cận SLA = đơn về BC giao còn <1 ca buffer / đã giao.",
+      sparkline: spBcg,
+      prevValue: prevOf(spBcg),
+    }),
+    makeKpi({
+      label: "% on time ≥4 ca",
+      value: computeHangVeBc4Ca(orders),
+      unit: "%",
+      direction: "higher-better",
+      target: 90,
+      thresholds: [90, 85],
+      definition: "Tỷ lệ đúng giờ ổn định = đơn về BC giao còn ≥4 ca trước hạn / tổng.",
+      sparkline: spHang,
+      prevValue: prevOf(spHang),
+    }),
+    makeKpi({
+      label: "Cost/kg",
+      value: computeCostPerKg(trips),
+      unit: "VND",
+      direction: "lower-better",
+      target: 1970,
+      thresholds: [1970, 2057],
+      definition: "Chi phí / kg = tổng chi phí linehaul / tổng kg.",
+      sparkline: spCpk,
+      prevValue: prevOf(spCpk),
+    }),
+    makeKpi({
+      label: "Ontime vận tải",
+      value: computeOntimeVanTai(trips),
+      unit: "%",
+      direction: "higher-better",
+      target: 95,
+      thresholds: [95, 92],
+      definition: "% chuyến đến đúng giờ (actual ≤ plan + 15') / tổng chuyến.",
+      sparkline: spOvt,
+      prevValue: prevOf(spOvt),
+    }),
+  ];
+}
+
 export function getRegionScorecard(filter: FilterState): RegionScorecardRow[] {
   const regions = HEATMAP_REGIONS;
   return regions.map((r) => {
@@ -1997,34 +2203,9 @@ export function getRegionScorecard(filter: FilterState): RegionScorecardRow[] {
 
     // === Metric mở rộng ===
     const denom = orders.length || 1;
-    const opr = round1(
-      pct(
-        orders.filter(
-          (o) =>
-            o.finalStatus === "delivered" ||
-            o.finalStatus === "returned_success" ||
-            o.finalStatus === "in_progress",
-        ).length,
-        denom,
-      ),
-    );
-    // ODR = giao trong ngày hẹn (có grace ~12h cuối ngày) — rộng hơn Ontime TC.
-    const deliveredGtc = orders.filter(
-      (o) => o.finalStatus === "delivered" && o.deliveredTs,
-    );
-    const odr =
-      deliveredGtc.length > 0
-        ? round1(
-            pct(
-              deliveredGtc.filter(
-                (o) =>
-                  new Date(o.deliveredTs!).getTime() <=
-                  new Date(o.promisedTs).getTime() + 12 * 3600 * 1000,
-              ).length,
-              deliveredGtc.length,
-            ),
-          )
-        : 0;
+    // OPR = tỷ lệ lấy hàng (đơn đã lấy / tổng); ODR = tỷ lệ giao hàng (đơn đã giao / tổng).
+    const opr = round1(pct(orders.filter((o) => o.pickedTs).length, denom));
+    const odr = round1(pct(orders.filter((o) => o.deliveredTs).length, denom));
     const ontimeTC = ontime; // ontime đúng mốc hẹn trên đơn GTC (= computeOntimeNetwork)
     const pctGan = computePctDaGan(pickups);
     const assignedIds = new Set(

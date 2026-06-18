@@ -196,8 +196,9 @@ function BcDetail({ bc }: { bc: TerritoryBc }) {
         <MetricWoW label="Tỷ lệ đổi kho" value={bc.doiKho} wow={bc.doiKhoWow} lowerBetter />
       </div>
 
-      {/* Ontime giao */}
-      <div className="pt-2 border-t border-[var(--color-border-soft)]">
+      {/* Ontime lấy + giao */}
+      <div className="pt-2 border-t border-[var(--color-border-soft)] space-y-2">
+        <Ontime label="Ontime lấy hàng" value={bc.ontimeLay} />
         <Ontime label="Ontime giao hàng" value={bc.ontimeGiao} />
       </div>
     </div>
