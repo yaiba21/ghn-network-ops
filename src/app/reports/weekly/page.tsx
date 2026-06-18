@@ -8,7 +8,6 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { FilterBar } from "@/components/filter/FilterBar";
 import { Card } from "@/components/ui/Card";
 import { DataTable, type Column } from "@/components/ui/DataTable";
-import { StatusBadge } from "@/components/ui/StatusBadge";
 import { cn, formatCompactInt, formatPct, formatVND } from "@/lib/utils";
 
 export default function WeeklyKpiPage() {
@@ -83,5 +82,4 @@ const columns: Column<ReturnType<typeof getWeeklyKpiReport>[number]>[] = [
     align: "right",
     render: (r) => (r.target > 0 ? <span className="text-[var(--color-text-muted)] text-xs">{r.higherBetter ? "≥ " : "≤ "}{fmt(r.target, r.unit)}</span> : "—"),
   },
-  { key: "status", label: "Trạng thái", align: "right", render: (r) => <div className="inline-flex"><StatusBadge status={r.status} /></div> },
 ];

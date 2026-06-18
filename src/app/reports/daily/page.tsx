@@ -15,7 +15,6 @@ import { Card } from "@/components/ui/Card";
 import { KpiCardFrom } from "@/components/ui/KpiCard";
 import { MetricChart } from "@/components/ui/MetricChart";
 import { DataTable, type Column } from "@/components/ui/DataTable";
-import { StatusBadge } from "@/components/ui/StatusBadge";
 import { StatusDot } from "@/components/ui/StatusDot";
 import {
   cn,
@@ -131,5 +130,4 @@ const regionColumns: Column<ReturnType<typeof getRegionScorecard>[number]>[] = [
     key: "pctTC", label: "%GTC", align: "right", sortable: true, sortValue: (r) => r.pctTC,
     render: (r) => <span className={r.pctTC >= 92 ? "text-emerald-600" : r.pctTC >= 88 ? "text-amber-600" : "text-red-600"}>{formatPct(r.pctTC, 1)}</span>,
   },
-  { key: "status", label: "Trạng thái", align: "right", render: (r) => <div className="inline-flex"><StatusBadge status={r.status} /></div> },
 ];

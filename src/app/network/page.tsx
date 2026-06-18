@@ -4,7 +4,6 @@ import { useMemo, useState } from "react";
 import { ChevronRight, X } from "lucide-react";
 import { useFilter } from "@/components/filter/FilterContext";
 import {
-  bcStateLabel,
   getBcArrivalMatrix,
   getBcDrillByRegion,
   getBcSubMetricsByRegion,
@@ -24,7 +23,6 @@ import { AlertBanner } from "@/components/ui/AlertBanner";
 import { Card } from "@/components/ui/Card";
 import { KpiCardFrom } from "@/components/ui/KpiCard";
 import { DataTable, type Column } from "@/components/ui/DataTable";
-import { StatusBadge } from "@/components/ui/StatusBadge";
 import dynamic from "next/dynamic";
 import { OdMatrix } from "@/components/ui/OdMatrix";
 
@@ -342,7 +340,6 @@ const subMetricRegionColumns: Column<
     key: "soLanQuaKtc", label: "TB lần qua KTC", align: "right", sortable: true, sortValue: (r) => r.soLanQuaKtc,
     render: (r) => <span className={pctColor(r.soLanQuaKtc, 1.5, 2, false)}>{r.soLanQuaKtc}</span>,
   },
-  { key: "status", label: "Trạng thái", align: "right", render: (r) => <div className="inline-flex"><StatusBadge status={r.status} /></div> },
 ];
 
 const bcSubMetricColumns: Column<ReturnType<typeof getBcSubMetricsByRegion>[number]>[] = [
@@ -364,7 +361,6 @@ const bcSubMetricColumns: Column<ReturnType<typeof getBcSubMetricsByRegion>[numb
     key: "saiLechKlkt", label: "% Sai lệch KLKT", align: "right", sortable: true, sortValue: (r) => r.saiLechKlkt,
     render: (r) => <span className={pctColor(r.saiLechKlkt, 1.5, 3, false)}>{formatPct(r.saiLechKlkt, 1)}</span>,
   },
-  { key: "status", label: "Trạng thái", align: "right", render: (r) => <div className="inline-flex"><StatusBadge status={r.status} /></div> },
 ];
 
 // Bảng ma trận số đơn về BC giao theo mốc ca còn lại × ngày
@@ -488,13 +484,6 @@ const regionColumns: Column<ReturnType<typeof getRegionScorecard>[number]>[] = [
   },
 ];
 
-const STATE_BADGE: Record<string, string> = {
-  stable: "bg-emerald-100 text-emerald-800 border-emerald-200",
-  overload: "bg-amber-100 text-amber-800 border-amber-200",
-  slaBreach: "bg-orange-100 text-orange-800 border-orange-200",
-  costBreach: "bg-red-100 text-red-800 border-red-200",
-};
-
 const bcDrillColumns: Column<ReturnType<typeof getBcDrillByRegion>[number]>[] = [
   { key: "bcName", label: "Bưu cục", render: (r) => <span className="font-medium truncate">{r.bcName}</span> },
   { key: "province", label: "Tỉnh", sortable: true },
@@ -507,14 +496,6 @@ const bcDrillColumns: Column<ReturnType<typeof getBcDrillByRegion>[number]>[] = 
   {
     key: "costPerKg", label: "Cost/kg", align: "right", sortable: true, sortValue: (r) => r.costPerKg,
     render: (r) => <span className={pctColor(r.costPerKg, 1970, 2300, false)}>{formatVND(r.costPerKg)}</span>,
-  },
-  {
-    key: "state", label: "Trạng thái", align: "right", sortable: true,
-    render: (r) => (
-      <span className={cn("inline-block px-2 py-0.5 text-xs font-medium border rounded", STATE_BADGE[r.state])}>
-        {bcStateLabel(r.state)}
-      </span>
-    ),
   },
 ];
 
@@ -531,5 +512,4 @@ const ktcColumns: Column<ReturnType<typeof getKtcScorecard>[number]>[] = [
     key: "fillRateKg", label: "Fill rate kg", align: "right", sortable: true, sortValue: (r) => r.fillRateKg,
     render: (r) => <span className={pctColor(r.fillRateKg, 75, 60)}>{formatPct(r.fillRateKg, 1)}</span>,
   },
-  { key: "status", label: "Trạng thái", align: "right", render: (r) => <div className="inline-flex"><StatusBadge status={r.status} /></div> },
 ];

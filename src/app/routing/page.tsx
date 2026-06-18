@@ -25,7 +25,6 @@ import { MetricChart } from "@/components/ui/MetricChart";
 import { Donut } from "@/components/ui/Donut";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import { MetricBadge } from "@/components/ui/MetricBadge";
-import { StatusBadge } from "@/components/ui/StatusBadge";
 import { REGION_LABEL_VI } from "@/lib/types";
 import {
   cn,
@@ -458,7 +457,6 @@ const regionColumns: Column<ReturnType<typeof getRoutingRegionComparison>[number
     key: "doiKhoNewAddr", label: "% Đổi kho địa chỉ mới", align: "right", sortable: true, sortValue: (r) => r.doiKhoNewAddr,
     render: (r) => <span className={r.doiKhoNewAddr <= 6 ? "text-emerald-600" : r.doiKhoNewAddr <= 10 ? "text-amber-600" : "text-red-600"}>{formatPct(r.doiKhoNewAddr, 1)}</span>,
   },
-  { key: "status", label: "Trạng thái", align: "right", render: (r) => <div className="inline-flex"><StatusBadge status={r.status} /></div> },
 ];
 
 const channelColumns: Column<ReturnType<typeof getRoutingChannelFlow>[number]>[] = [
@@ -518,5 +516,4 @@ const topBcColumns: Column<ReturnType<typeof getTopRevertBcs>[number]>[] = [
     render: (r) => <span className={r.revertRate <= 2.3 ? "text-emerald-600" : r.revertRate <= 4 ? "text-amber-600" : "text-red-600"}>{formatPct(r.revertRate, 1)}</span>,
   },
   { key: "topReason", label: "Lý do chủ đạo", render: (r) => <span className="text-xs px-2 py-0.5 bg-[var(--color-hover)] rounded">{r.topReason}</span> },
-  { key: "status", label: "Trạng thái", align: "right", render: (r) => <div className="inline-flex"><StatusBadge status={r.status} /></div> },
 ];

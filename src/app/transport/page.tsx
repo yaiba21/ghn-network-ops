@@ -26,7 +26,6 @@ import { Modal } from "@/components/ui/Modal";
 import { DimensionSelect } from "@/components/filter/DimensionSelect";
 import { Card } from "@/components/ui/Card";
 import { DataTable, type Column } from "@/components/ui/DataTable";
-import { StatusBadge } from "@/components/ui/StatusBadge";
 import { StatusDot } from "@/components/ui/StatusDot";
 import { KpiCard } from "@/components/ui/KpiCard";
 import { X } from "lucide-react";
@@ -410,7 +409,6 @@ const laneColumns: Column<ReturnType<typeof getLaneHealth>[number]>[] = [
     render: (r) => <span className={r.emptyPct <= 20 ? "text-emerald-600" : r.emptyPct <= 30 ? "text-amber-600" : "text-red-600"}>{formatPct(r.emptyPct, 1)}</span>,
   },
   { key: "avgCost", label: "Cost TB", align: "right", sortable: true, sortValue: (r) => r.avgCost, render: (r) => formatVND(r.avgCost, true) },
-  { key: "status", label: "Trạng thái", align: "right", render: (r) => <div className="inline-flex"><StatusBadge status={r.status} /></div> },
 ];
 
 const tripColumns: Column<ReturnType<typeof getTransportTrips>[number]>[] = [
@@ -430,7 +428,6 @@ const tripColumns: Column<ReturnType<typeof getTransportTrips>[number]>[] = [
   { key: "cost", label: "Cost", align: "right", sortable: true, sortValue: (r) => r.cost, render: (r) => formatVND(r.cost, true) },
   { key: "vehicle", label: "Xe", sortable: true },
   { key: "carrier", label: "NCC", sortable: true },
-  { key: "status", label: "Trạng thái", align: "right", render: (r) => <div className="inline-flex"><StatusBadge status={r.status} /></div> },
 ];
 
 const carrierColumns: Column<ReturnType<typeof getTransportByCarrier>[number]>[] = [
@@ -442,7 +439,6 @@ const carrierColumns: Column<ReturnType<typeof getTransportByCarrier>[number]>[]
   },
   { key: "fillRateKg", label: "Fill kg", align: "right", sortable: true, sortValue: (r) => r.fillRateKg, render: (r) => formatPct(r.fillRateKg, 1) },
   { key: "avgCost", label: "Cost TB", align: "right", sortable: true, sortValue: (r) => r.avgCost, render: (r) => formatVND(r.avgCost) },
-  { key: "status", label: "Trạng thái", align: "right", render: (r) => <div className="inline-flex"><StatusBadge status={r.status} /></div> },
 ];
 
 const routeTypeColumns: Column<ReturnType<typeof getTransportByRouteType>[number]>[] = [
