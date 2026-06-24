@@ -12,6 +12,7 @@ import {
   PackageSearch,
   Bus,
   Target,
+  Map,
   ChevronDown,
   ChevronRight,
   type LucideProps,
@@ -33,6 +34,7 @@ const NAV: NavItem[] = [
   { label: "Hành Trình Đơn", href: "/journey", icon: PackageSearch },
   { label: "Gán đơn", href: "/routing", icon: Route },
   { label: "Mạng lưới BC", href: "/network", icon: Truck },
+  { label: "Phạm vi BC", href: "/coverage", icon: Map },
   { label: "Định tuyến", href: "/transport", icon: Bus },
   { label: "Quản lý mục tiêu", href: "/targets", icon: Target },
   {

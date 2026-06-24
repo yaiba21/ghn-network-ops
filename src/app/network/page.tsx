@@ -13,9 +13,8 @@ import {
   getLaneMatrix,
   getNetworkKeyMetrics,
   getRegionScorecard,
-  getTerritoryMap,
 } from "@/lib/aggregators";
-import { dataUpdatedAt, getProvinces, getRegions } from "@/lib/mock-data";
+import { dataUpdatedAt, getRegions } from "@/lib/mock-data";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { FilterBar } from "@/components/filter/FilterBar";
 import { DimensionSelect } from "@/components/filter/DimensionSelect";
@@ -23,22 +22,7 @@ import { AlertBanner } from "@/components/ui/AlertBanner";
 import { Card } from "@/components/ui/Card";
 import { KpiCardFrom } from "@/components/ui/KpiCard";
 import { DataTable, type Column } from "@/components/ui/DataTable";
-import dynamic from "next/dynamic";
 import { OdMatrix } from "@/components/ui/OdMatrix";
-
-// Leaflet cần window → load client-only, tránh SSR error
-const LeafletTerritoryMap = dynamic(
-  () =>
-    import("@/components/ui/LeafletTerritoryMap").then(
-      (m) => m.LeafletTerritoryMap,
-    ),
-  {
-    ssr: false,
-    loading: () => (
-      <div className="h-[560px] ghn-skeleton rounded-md" />
-    ),
-  },
-);
 import { REGION_LABEL_VI, type RegionCode } from "@/lib/types";
 import {
   cn,
@@ -75,19 +59,6 @@ export default function NetworkPage() {
   const bcSubDrill = useMemo(
     () => (subDrillRegion ? getBcSubMetricsByRegion(filter, subDrillRegion, 50) : []),
     [filter, subDrillRegion],
-  );
-
-  // Territory map — chọn tỉnh để xem phân chia địa bàn BC
-  const provinceOpts = useMemo(
-    () => getProvinces().map((p) => ({ value: p.code, label: p.name })),
-    [],
-  );
-  const [territoryProvince, setTerritoryProvince] = useState<string>(
-    filter.provinceCode ?? "HCM",
-  );
-  const territory = useMemo(
-    () => getTerritoryMap(filter, territoryProvince),
-    [filter, territoryProvince],
   );
 
   // Số đơn về BC giao theo mốc thời gian — lọc vùng giao + vùng lấy
@@ -181,25 +152,6 @@ export default function NetworkPage() {
           />
         </Card>
       )}
-
-      {/* === Phân chia phạm vi BC (territory map) — ngay dưới scorecard === */}
-      <Card
-        title="Phân chia phạm vi BC"
-        subtitle="Heatmap mức cần chú ý từng BC (đỏ = cần xử lý). Chọn tỉnh → click ô để xem: loại kho, loại hình, tồn kho (quá tải?), %LTC / %GTC / đổi kho kèm WoW."
-        actions={
-          <DimensionSelect
-            label="Tỉnh / Thành"
-            value={territoryProvince}
-            options={provinceOpts}
-            onChange={(v) => v && setTerritoryProvince(v)}
-            allOptionLabel="Chọn tỉnh"
-            width={200}
-            searchable
-          />
-        }
-      >
-        <LeafletTerritoryMap data={territory} />
-      </Card>
 
       {/* === Số đơn về đến BC Giao theo từng mốc thời gian === */}
       <Card

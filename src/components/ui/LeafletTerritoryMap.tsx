@@ -16,7 +16,7 @@ import { STATUS_TOKENS } from "@/lib/kpi-config";
 
 type Props = {
   data: TerritoryMapData;
-  height?: number;
+  height?: number | string;
 };
 
 // Heatmap attention: đỏ = cần xử lý, vàng = theo dõi, xanh = ổn
