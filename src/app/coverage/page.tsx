@@ -122,12 +122,13 @@ export default function CoveragePage() {
     return manifest[dvhc].provinces.filter((p) => manifest.provinceRegion?.[p.slug] === regionCode).map((p) => p.slug);
   }, [level, provinceSlugs, regionCode, manifest, dvhc]);
 
-  const srcs = useMemo(() =>
-    level === "region"
-      ? [`/coverage/${dvhc}/region/${regionCode}.geojson`]
-      : provinceSlugs.map((s) => `/coverage/${dvhc}/province/${s}.geojson`),
-    [level, dvhc, regionCode, provinceSlugs],
-  );
+  // Dùng province files (mịn hơn region file) để ranh giới chính xác, ít hở/đè.
+  // Chỉ cả nước (ALL) mới dùng file region/ALL gộp (zoom xa, không thấy hở).
+  const srcs = useMemo(() => {
+    if (level === "province") return provinceSlugs.map((s) => `/coverage/${dvhc}/province/${s}.geojson`);
+    if (regionCode === "ALL") return [`/coverage/${dvhc}/region/ALL.geojson`];
+    return activeSlugs.map((s) => `/coverage/${dvhc}/province/${s}.geojson`);
+  }, [level, dvhc, regionCode, provinceSlugs, activeSlugs]);
   const otherSrcs = useMemo(() => {
     const od: Dvhc = dvhc === "new" ? "old" : "new";
     if (level === "region" && regionCode === "ALL") return [`/coverage/${od}/region/ALL.geojson`];

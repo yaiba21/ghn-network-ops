@@ -28,14 +28,31 @@ export type CoverageStats = {
   bcCount: number; bcNoNew: number; bcNoOld: number;
 } | null;
 
-const COLORS: Record<Dvhc, { fill: string; line: string }> = {
-  new: { fill: "#3b82f6", line: "#2563eb" },
-  old: { fill: "#f97316", line: "#ea580c" },
+// Loại hình vận hành BC (suy từ DELIVERY/PICK/RETURN theo phường mới/cũ)
+export type BcKind = "D" | "P" | "R" | "MIX" | "NONE";
+const KIND_COLOR: Record<BcKind, { fill: string; line: string }> = {
+  D: { fill: "#2563eb", line: "#1d4ed8" },     // Chuyên Giao
+  P: { fill: "#16a34a", line: "#15803d" },     // Chuyên Lấy
+  R: { fill: "#f59e0b", line: "#d97706" },     // Chuyên Trả
+  MIX: { fill: "#7c3aed", line: "#6d28d9" },   // Hỗn hợp (Giao + Lấy)
+  NONE: { fill: "#9ca3af", line: "#6b7280" },  // chưa có BC phụ trách
 };
-const NO_BC = { fill: "#9ca3af", line: "#6b7280" };   // phường chưa có BC phụ trách
+export const KIND_LABEL: Record<BcKind, string> = {
+  D: "Chuyên Giao", P: "Chuyên Lấy", R: "Chuyên Trả", MIX: "Hỗn hợp", NONE: "Chưa có BC",
+};
+// BC có cả Giao & Lấy → Hỗn hợp; có Lấy (kể cả +Trả) → Chuyên Lấy; có Giao → Chuyên Giao; chỉ Trả → Chuyên Trả
+function bcKindOf(bc: BcInfo | undefined, dvhc: Dvhc): BcKind {
+  if (!bc?.area) return "NONE";
+  const k = dvhc === "new" ? "nC" : "oC";
+  const hasD = bc.area.DELIVERY[k] > 0, hasP = bc.area.PICK[k] > 0, hasR = bc.area.RETURN[k] > 0;
+  if (hasD && hasP) return "MIX";
+  if (hasP) return "P";
+  if (hasD) return "D";
+  if (hasR) return "R";
+  return "NONE";
+}
 const HILITE = { fill: "#dc2626", line: "#b91c1c" };
 const CLICK = { fill: "#dc2626", line: "#7f1d1d" };
-const BC_DOT = "#1e3a5f";
 const BC_SEL = "#dc2626";
 
 type Feat = {
@@ -177,12 +194,12 @@ export function CoverageMap({
     return { union, bcsNew, bcsOld };
   }, [geo, wmap, otherGeo, otherMap, dvhc]);
 
-  // marker = TẤT CẢ BC trong scope (kể cả BC chưa gán bộ đang xem), tại vị trí thật
+  // marker = TẤT CẢ BC trong scope (kể cả BC chưa gán bộ đang xem), tại vị trí thật, màu theo loại hình
   const markers = useMemo(() => {
-    const out: { id: string; name: string; lat: number; lng: number }[] = [];
-    bcSets.union.forEach((id) => { const b = bcById[id]; if (b && b.lat != null && b.lng != null) out.push({ id, name: b.name, lat: b.lat, lng: b.lng }); });
+    const out: { id: string; name: string; lat: number; lng: number; kind: BcKind }[] = [];
+    bcSets.union.forEach((id) => { const b = bcById[id]; if (b && b.lat != null && b.lng != null) out.push({ id, name: b.name, lat: b.lat, lng: b.lng, kind: bcKindOf(b, dvhc) }); });
     return out;
-  }, [bcSets, bcById]);
+  }, [bcSets, bcById, dvhc]);
 
   useEffect(() => { onBcsInScope([...bcSets.union]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -221,22 +238,18 @@ export function CoverageMap({
     return !!id && hlBc.has(id);
   }, [hlWard, hlBc, wmap]);
 
+  // màu phường = loại hình BC phụ trách (Chuyên Giao/Lấy/Trả/Hỗn hợp), xám = chưa có BC
   const styleFn = useCallback((feature?: { properties?: { wardCode?: string } }): PathOptions => {
-    const col = COLORS[dvhc];
     const code = String(feature?.properties?.wardCode ?? "");
-    const hasBc = !!wmap?.[code];
-    if (!filterActive) {
-      return hasBc
-        ? { color: col.line, weight: 0.4, fillColor: col.fill, fillOpacity: 0.3 }
-        : { color: NO_BC.line, weight: 0.4, fillColor: NO_BC.fill, fillOpacity: 0.4 };
-    }
+    const id = wmap?.[code];
+    const kind = id ? bcKindOf(bcById[id], dvhc) : "NONE";
+    const col = KIND_COLOR[kind];
+    if (!filterActive) return { color: col.line, weight: 0.4, fillColor: col.fill, fillOpacity: kind === "NONE" ? 0.4 : 0.5 };
     if (code === clickedWard) return { color: CLICK.line, weight: 2.5, fillColor: CLICK.fill, fillOpacity: 0.6 };
-    if (wardInFilter(code)) return { color: HILITE.line, weight: 1.4, fillColor: HILITE.fill, fillOpacity: 0.5 };
+    if (wardInFilter(code)) return { color: HILITE.line, weight: 1.4, fillColor: HILITE.fill, fillOpacity: 0.55 };
     if (mode === "only") return { opacity: 0, fillOpacity: 0, weight: 0 };
-    return hasBc
-      ? { color: col.line, weight: 0.3, fillColor: col.fill, fillOpacity: 0.12 }
-      : { color: NO_BC.line, weight: 0.3, fillColor: NO_BC.fill, fillOpacity: 0.15 };
-  }, [dvhc, filterActive, clickedWard, wardInFilter, mode, wmap]);
+    return { color: col.line, weight: 0.3, fillColor: col.fill, fillOpacity: 0.14 };
+  }, [wmap, bcById, dvhc, filterActive, clickedWard, wardInFilter, mode]);
 
   useEffect(() => { geoRef.current?.setStyle(styleFn as (f: unknown) => PathOptions); }, [styleFn, geo]);
 
@@ -255,32 +268,38 @@ export function CoverageMap({
       if (lat < a) a = lat; if (lat > b) b = lat; if (lng < c) c = lng; if (lng > d) d = lng; }
     return has ? [[a, c], [b, d]] : null;
   }, [geo]);
+  // bounds chỉ dựa trên LỰA CHỌN TỪ DROPDOWN (bcCodes/wardCodes) — KHÔNG tính clickedWard
+  // → bấm polygon trên map không làm đổi zoom (fix lỗi zoom out khi click)
+  const dropdownActive = bcCodes.length > 0 || wardCodes.length > 0;
   const filterBounds = useMemo<[[number, number], [number, number]] | null>(() => {
-    if (!geo || !filterActive) return null;
+    if (!geo || !dropdownActive) return null;
+    const wset = new Set(wardCodes); const bset = new Set(bcCodes);
     let a = 90, b = -90, c = 180, d = -180, has = false;
     for (const f of geo.features) {
-      if (!wardInFilter(String(f.properties.wardCode ?? ""))) continue;
+      const code = String(f.properties.wardCode ?? "");
+      const id = wmap?.[code];
+      if (!(wset.has(code) || (id && bset.has(id)))) continue;
       const [lat, lng] = centroidOf(f); has = true;
       if (lat < a) a = lat; if (lat > b) b = lat; if (lng < c) c = lng; if (lng > d) d = lng;
     }
     return has ? [[a, c], [b, d]] : null;
-  }, [geo, filterActive, wardInFilter]);
+  }, [geo, dropdownActive, wardCodes, bcCodes, wmap]);
   // 1 nguồn fit duy nhất (tránh ResizeObserver đè): ưu tiên phường focus (bấm từ list) > filter (mode chỉ lọc) > scope
   const targetBounds = useMemo<[[number, number], [number, number]] | null>(() => {
     if (focusWard && geo) {
       const f = geo.features.find((x) => String(x.properties.wardCode ?? "") === focusWard);
       if (f) return featureBounds(f);
     }
-    if (mode === "only" && filterActive && filterBounds) return filterBounds;
+    if (mode === "only" && dropdownActive && filterBounds) return filterBounds;
     return scopeBounds;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focusWard, geo, mode, filterActive, filterBounds, scopeBounds, focusTick, wardFocusTick]);
+  }, [focusWard, geo, mode, dropdownActive, filterBounds, scopeBounds, focusTick, wardFocusTick]);
 
   const wardInfo = useMemo(() => {
     if (!clickedWard) return null;
     const meta = wardMeta.get(clickedWard); if (!meta) return null;
     const id = wmap?.[clickedWard]; const bc = id ? bcById[id] : undefined;
-    return { code: clickedWard, ...meta, bcName: bc?.name ?? null, bcId: bc?.id ?? null };
+    return { code: clickedWard, ...meta, bcName: bc?.name ?? null, bcId: bc?.id ?? null, bcKind: bc ? bcKindOf(bc, dvhc) : null };
   }, [clickedWard, wardMeta, wmap, bcById]);
 
   const shownWards = filterActive
@@ -305,9 +324,9 @@ export function CoverageMap({
           if (mode === "only" && filterActive && !isHl) return null;
           return (
             <CircleMarker key={`${m.id}-${mi}`} center={[m.lat, m.lng]} radius={isHl ? 7 : 4}
-              pathOptions={{ color: "#fff", fillColor: isHl ? BC_SEL : BC_DOT, fillOpacity: 1, weight: isHl ? 2 : 1.2 }}
+              pathOptions={{ color: "#fff", fillColor: isHl ? BC_SEL : KIND_COLOR[m.kind].line, fillOpacity: 1, weight: isHl ? 2 : 1.2 }}
               eventHandlers={{ click: () => onToggleBc(m.id) }}>
-              <LTooltip>{m.name} — bấm để lọc theo BC</LTooltip>
+              <LTooltip>{m.name} — {KIND_LABEL[m.kind]} — bấm để lọc</LTooltip>
             </CircleMarker>
           );
         })}
@@ -320,13 +339,16 @@ export function CoverageMap({
         <div className="absolute top-2 left-1/2 -translate-x-1/2 z-[1000] bg-amber-50 border border-amber-200 text-amber-800 rounded-md px-3 py-1.5 text-xs shadow-sm">Không có polygon ranh giới cho {scopeLabel}</div>
       )}
 
-      <div className="absolute bottom-2 left-2 z-[1000] bg-white/95 border border-[var(--color-border)] rounded-md px-3 py-2 text-[10px] text-[var(--color-text-muted)] shadow-sm space-y-1">
-        {geo && (<div className="font-medium uppercase tracking-wide">{shownWards} phường/xã {filterActive ? "(đang lọc)" : ""}</div>)}
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="inline-flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm" style={{ background: COLORS[dvhc].fill, opacity: 0.5 }} />Có BC ({dvhc === "new" ? "mới" : "cũ"})</span>
-          {!filterActive && noBcCount > 0 && (<span className="inline-flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm" style={{ background: NO_BC.fill, opacity: 0.6 }} />Chưa có BC ({noBcCount})</span>)}
-          {filterActive && (<span className="inline-flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm" style={{ background: HILITE.fill, opacity: 0.6 }} />Đang chọn</span>)}
-          <span className="inline-flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full" style={{ background: BC_DOT }} />BC ({markers.length})</span>
+      <div className="absolute bottom-2 left-2 z-[1000] bg-white/95 border border-[var(--color-border)] rounded-md px-3 py-2 text-[10px] text-[var(--color-text-muted)] shadow-sm space-y-1 max-w-[260px]">
+        {geo && (<div className="font-medium uppercase tracking-wide">{shownWards} phường/xã · {markers.length} BC {filterActive ? "(đang lọc)" : ""}</div>)}
+        <div className="text-[9px] uppercase tracking-wide">Loại hình BC ({dvhc === "new" ? "phường mới" : "phường cũ"})</div>
+        <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
+          {(["MIX", "D", "P", "R", "NONE"] as BcKind[]).map((k) => (
+            <span key={k} className="inline-flex items-center gap-1">
+              <span className="w-2.5 h-2.5 rounded-sm" style={{ background: KIND_COLOR[k].fill, opacity: k === "NONE" ? 0.5 : 0.75 }} />
+              {KIND_LABEL[k]}{k === "NONE" ? ` (${noBcCount})` : ""}
+            </span>
+          ))}
         </div>
       </div>
 
@@ -343,8 +365,16 @@ export function CoverageMap({
           <div className="mt-2 pt-2 border-t border-[var(--color-border)]">
             <div className="text-[10px] uppercase tracking-wide text-[var(--color-text-muted)]">Bưu cục phụ trách</div>
             {wardInfo.bcName ? (
-              <button type="button" onClick={() => wardInfo.bcId && onToggleBc(wardInfo.bcId)}
-                className="mt-0.5 text-[var(--color-ghn-red)] font-medium hover:underline text-left">{wardInfo.bcName} →</button>
+              <>
+                <button type="button" onClick={() => wardInfo.bcId && onToggleBc(wardInfo.bcId)}
+                  className="mt-0.5 text-[var(--color-ghn-red)] font-medium hover:underline text-left">{wardInfo.bcName} →</button>
+                {wardInfo.bcKind && (
+                  <div className="mt-0.5 inline-flex items-center gap-1 text-[10px]">
+                    <span className="w-2 h-2 rounded-sm" style={{ background: KIND_COLOR[wardInfo.bcKind].fill }} />
+                    {KIND_LABEL[wardInfo.bcKind]}
+                  </div>
+                )}
+              </>
             ) : (<div className="text-[var(--color-ghn-red)]">Chưa có BC phụ trách</div>)}
           </div>
         </div>
