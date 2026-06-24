@@ -4089,6 +4089,42 @@ export function getTerritoryMap(
   };
 }
 
+export type CoverageBc = {
+  code: string;
+  name: string;
+  lat: number;
+  lng: number;
+  status: Status;
+};
+
+/**
+ * Vị trí bưu cục cho trang Phạm vi BC — theo vùng (RegionCode) hoặc tỉnh (app code).
+ * Toạ độ lấy từ getTerritoryMap (scatter quanh centroid tỉnh thật).
+ */
+export function getCoverageBcs(
+  filter: FilterState,
+  level: "region" | "province",
+  value: string,
+): CoverageBc[] {
+  const toMarker = (provinceCode: string): CoverageBc[] =>
+    getTerritoryMap(filter, provinceCode).bcs.map((b) => ({
+      code: b.bcCode,
+      name: b.bcName,
+      lat: b.lat,
+      lng: b.lng,
+      status: b.status,
+    }));
+
+  if (level === "province") {
+    return value ? toMarker(value) : [];
+  }
+  // region: gộp BC của các tỉnh (app) thuộc vùng
+  const provinces = [
+    ...new Set(getBcs().filter((b) => b.regionCode === value).map((b) => b.provinceCode)),
+  ];
+  return provinces.flatMap(toMarker);
+}
+
 
 // =============================================================================
 // PHASE 10 — Network OD matrix (lane KTC×KTC)

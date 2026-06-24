@@ -98,7 +98,7 @@ export function Select<V extends string = string>({
       {open && (
         <div
           className={cn(
-            "absolute z-50 mt-1 min-w-full max-h-72 overflow-auto bg-white border border-[var(--color-border)] rounded-md shadow-lg",
+            "absolute z-[2000] mt-1 min-w-full max-h-72 overflow-auto bg-white border border-[var(--color-border)] rounded-md shadow-lg",
             align === "right" ? "right-0" : "left-0",
           )}
         >
