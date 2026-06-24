@@ -10,7 +10,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { DimensionSelect } from "@/components/filter/DimensionSelect";
 import { MultiSelect } from "@/components/ui/MultiSelect";
 import { cn } from "@/lib/utils";
-import type { CoverageMode } from "@/components/ui/CoverageMap";
+import type { CoverageMode, CoverageStats } from "@/components/ui/CoverageMap";
 
 const CoverageMap = dynamic(
   () => import("@/components/ui/CoverageMap").then((m) => m.CoverageMap),
@@ -26,7 +26,12 @@ type Manifest = {
   oldToNew?: Record<string, string>;
   provinceRegion?: Record<string, string>;
 };
-type Stats = { newWards: number; newUncovered: number; oldWards: number; oldUncovered: number } | null;
+type Stats = CoverageStats;
+type UncWard = { code: string; name: string; prov: string };
+function slugify(s: string): string {
+  return s.replace(/Đ/g, "D").replace(/đ/g, "d").normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
 
 const REGION_ORDER: RegionCode[] = [
   "HCM", "HNO", "DSH", "DNB", "DCL", "TNB", "DBB", "BTB", "TTB", "NTB", "TNG", "TNT", "XBG", "TBB",
@@ -54,6 +59,7 @@ export default function CoveragePage() {
   const [wardFocusTick, setWardFocusTick] = useState(0);
   const [wardList, setWardList] = useState<{ code: string; name: string; prov: string }[]>([]);
   const [stats, setStats] = useState<Stats>(null);
+  const [openList, setOpenList] = useState<null | "new" | "old">(null);
 
   useEffect(() => {
     fetch("/coverage/manifest.json").then((r) => r.json()).then(setManifest).catch(() => {});
@@ -64,6 +70,23 @@ export default function CoveragePage() {
     getProvinces().forEach((p) => m.set(normName(p.name), p.code));
     return m;
   }, []);
+
+  // toàn bộ BC cả nước (vị trí cố định) → tính "chưa có BC" cộng dồn khớp các cấp
+  const allBcs = useMemo(() => getCoverageBcList("all", ""), []);
+
+  // tương ứng lãnh thổ giữa ĐVHC cũ ↔ mới (để đếm bộ kia đúng cùng vùng đất)
+  const { newToOldSlugs, oldToNewSlug } = useMemo(() => {
+    const n2o = new Map<string, string[]>();
+    const o2n = new Map<string, string>();
+    const o2nName = manifest?.oldToNew ?? {};
+    for (const [oldSlug, newName] of Object.entries(o2nName)) {
+      const newSlug = slugify(newName);
+      o2n.set(oldSlug, newSlug);
+      if (!n2o.has(newSlug)) n2o.set(newSlug, []);
+      n2o.get(newSlug)!.push(oldSlug);
+    }
+    return { newToOldSlugs: n2o, oldToNewSlug: o2n };
+  }, [manifest]);
 
   const provinceOpts = useMemo(
     () => (manifest ? manifest[dvhc].provinces.map((p) => ({ value: p.slug, label: p.name })) : []),
@@ -112,12 +135,31 @@ export default function CoveragePage() {
     return newName ? appByNorm.get(normName(newName)) ?? "" : "";
   };
 
-  const pathsFor = (d: Dvhc): string[] =>
+  // các tỉnh (slug theo dvhc hiện tại) thuộc scope đang xem
+  const activeSlugs = useMemo(() => {
+    if (level === "province") return provinceSlugs;
+    if (regionCode === "ALL" || !manifest) return [];
+    return manifest[dvhc].provinces.filter((p) => manifest.provinceRegion?.[p.slug] === regionCode).map((p) => p.slug);
+  }, [level, provinceSlugs, regionCode, manifest, dvhc]);
+
+  const srcs = useMemo(() =>
     level === "region"
-      ? [`/coverage/${d}/region/${regionCode}.geojson`]
-      : provinceSlugs.map((s) => `/coverage/${d}/province/${s}.geojson`);
-  const srcs = pathsFor(dvhc);
-  const otherSrcs = pathsFor(dvhc === "new" ? "old" : "new");
+      ? [`/coverage/${dvhc}/region/${regionCode}.geojson`]
+      : provinceSlugs.map((s) => `/coverage/${dvhc}/province/${s}.geojson`),
+    [level, dvhc, regionCode, provinceSlugs],
+  );
+
+  // bộ ĐVHC còn lại — lấy đúng LÃNH THỔ tương ứng (qua oldToNew) để số liệu cộng dồn khớp
+  const otherSrcs = useMemo(() => {
+    const od: Dvhc = dvhc === "new" ? "old" : "new";
+    if (level === "region" && regionCode === "ALL") return [`/coverage/${od}/region/ALL.geojson`];
+    const others = new Set<string>();
+    for (const s of activeSlugs) {
+      if (dvhc === "new") (newToOldSlugs.get(s) ?? []).forEach((o) => others.add(o));
+      else { const ns = oldToNewSlug.get(s); if (ns) others.add(ns); }
+    }
+    return [...others].map((s) => `/coverage/${od}/province/${s}.geojson`);
+  }, [dvhc, level, regionCode, activeSlugs, newToOldSlugs, oldToNewSlug]);
 
   const scopeLabel =
     level === "region"
@@ -157,10 +199,12 @@ export default function CoveragePage() {
   }, [bcsRaw, isFallback, wardList.length]);
 
   const bcOpts = useMemo(() => bcs.map((b) => ({ value: b.code, label: `${b.code} · ${b.name}` })), [bcs]);
-  const wardOpts = useMemo(
-    () => wardList.map((w) => ({ value: w.code, label: w.prov ? `${w.name} · ${w.prov}` : w.name })),
-    [wardList],
-  );
+  const wardOpts = useMemo(() => {
+    const seen = new Set<string>();
+    return wardList
+      .filter((w) => w.code && !seen.has(w.code) && seen.add(w.code))
+      .map((w) => ({ value: w.code, label: w.prov ? `${w.name} · ${w.prov}` : w.name }));
+  }, [wardList]);
 
   const profileBcCode = bcCodes.length === 1 ? bcCodes[0] : null;
   const selectedProfile = useMemo(
@@ -217,18 +261,30 @@ export default function CoveragePage() {
         )}
       </div>
 
-      <StatsBar scopeLabel={scopeLabel} bcCount={bcs.length} fallback={isFallback} stats={stats} />
+      <StatsBar
+        scopeLabel={scopeLabel}
+        bcCount={bcs.length}
+        fallback={isFallback}
+        stats={stats}
+        openList={openList}
+        onToggleList={(k) => setOpenList((cur) => (cur === k ? null : k))}
+      />
 
       <CoverageMap
         srcs={srcs}
         otherSrcs={otherSrcs}
         dvhc={dvhc}
         bcs={bcs}
+        allBcs={allBcs}
         mode={mode}
         bcCodes={bcCodes}
         wardCodes={wardCodes}
         clickedWard={clickedWard}
-        onClickWard={(code) => setClickedWard(code || null)}
+        onClickWard={(code, additive) => {
+          if (!code) { setClickedWard(null); return; }
+          if (additive) setWardCodes((prev) => (prev.includes(code) ? prev.filter((x) => x !== code) : [...prev, code]));
+          else setClickedWard(code);
+        }}
         onToggleBc={toggleBc}
         profileBcCode={profileBcCode}
         selectedProfile={selectedProfile}
@@ -242,29 +298,74 @@ export default function CoveragePage() {
   );
 }
 
-function StatsBar({ scopeLabel, bcCount, fallback, stats }: { scopeLabel: string; bcCount: number; fallback: boolean; stats: Stats }) {
+function StatsBar({
+  scopeLabel, bcCount, fallback, stats, openList, onToggleList,
+}: {
+  scopeLabel: string; bcCount: number; fallback: boolean; stats: Stats;
+  openList: null | "new" | "old"; onToggleList: (k: "new" | "old") => void;
+}) {
   const nf = (n: number | undefined) => (n == null ? "…" : n.toLocaleString("vi-VN"));
-  const cells: { label: string; value: string; sub?: string; warn?: boolean }[] = [
+  const cells: { label: string; value: string; sub?: string; warn?: boolean; listKey?: "new" | "old"; count?: number }[] = [
     { label: "Số lượng BC", value: nf(bcCount), sub: fallback ? "ước lượng theo vùng" : undefined },
     { label: "Phường MỚI", value: nf(stats?.newWards) },
-    { label: "Phường mới chưa có BC", value: nf(stats?.newUncovered), warn: !!stats?.newUncovered },
+    { label: "Phường mới chưa có BC", value: nf(stats?.newUncovered), warn: !!stats?.newUncovered, listKey: "new", count: stats?.newUncovered ?? 0 },
     { label: "Phường CŨ", value: nf(stats?.oldWards) },
-    { label: "Phường cũ chưa có BC", value: nf(stats?.oldUncovered), warn: !!stats?.oldUncovered },
+    { label: "Phường cũ chưa có BC", value: nf(stats?.oldUncovered), warn: !!stats?.oldUncovered, listKey: "old", count: stats?.oldUncovered ?? 0 },
   ];
+  const list: UncWard[] = openList === "new" ? stats?.newUncoveredList ?? [] : openList === "old" ? stats?.oldUncoveredList ?? [] : [];
   return (
     <div className="rounded-md border border-[var(--color-border)] bg-white overflow-hidden">
       <div className="px-3 py-1.5 text-[11px] uppercase tracking-wide text-[var(--color-text-muted)] border-b border-[var(--color-border)]">
         Thống kê — {scopeLabel}
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 divide-x divide-y lg:divide-y-0 divide-[var(--color-border)]">
-        {cells.map((c) => (
-          <div key={c.label} className="px-3 py-2">
-            <div className="text-[11px] text-[var(--color-text-muted)]">{c.label}</div>
-            <div className={cn("text-lg font-semibold", c.warn ? "text-[var(--color-ghn-red)]" : "text-[var(--color-text)]")}>{c.value}</div>
-            {c.sub && <div className="text-[10px] text-[var(--color-text-faint)]">{c.sub}</div>}
-          </div>
-        ))}
+        {cells.map((c) => {
+          const clickable = c.listKey && (c.count ?? 0) > 0;
+          const active = openList === c.listKey && clickable;
+          return (
+            <button
+              key={c.label}
+              type="button"
+              disabled={!clickable}
+              onClick={() => clickable && onToggleList(c.listKey!)}
+              className={cn(
+                "px-3 py-2 text-left",
+                clickable ? "cursor-pointer hover:bg-[var(--color-hover)]" : "cursor-default",
+                active && "bg-[var(--color-row-selected)]",
+              )}
+            >
+              <div className="text-[11px] text-[var(--color-text-muted)]">
+                {c.label}{clickable && <span className="ml-1">▾</span>}
+              </div>
+              <div className={cn("text-lg font-semibold", c.warn ? "text-[var(--color-ghn-red)]" : "text-[var(--color-text)]")}>{c.value}</div>
+              {c.sub && <div className="text-[10px] text-[var(--color-text-faint)]">{c.sub}</div>}
+            </button>
+          );
+        })}
       </div>
+      {openList && (
+        <div className="border-t border-[var(--color-border)] bg-[var(--color-hover)]/40">
+          <div className="px-3 py-1.5 text-[11px] text-[var(--color-text-muted)] flex items-center justify-between">
+            <span>Danh sách phường {openList === "new" ? "MỚI" : "CŨ"} chưa có BC phụ trách ({list.length})</span>
+          </div>
+          <div className="max-h-44 overflow-auto px-2 pb-2 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-3 gap-y-0.5">
+            {list.length === 0 ? (
+              <div className="text-xs text-[var(--color-text-muted)] px-1">—</div>
+            ) : (
+              <>
+                {list.slice(0, 400).map((w, i) => (
+                  <div key={`${w.code}-${i}`} className="text-xs text-[var(--color-text)] truncate" title={`${w.name} · ${w.prov}`}>
+                    {w.name}<span className="text-[var(--color-text-faint)]"> · {w.prov}</span>
+                  </div>
+                ))}
+                {list.length > 400 && (
+                  <div className="text-xs text-[var(--color-text-muted)] px-1">… +{(list.length - 400).toLocaleString("vi-VN")} phường nữa</div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

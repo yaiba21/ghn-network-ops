@@ -40,11 +40,9 @@ type Assign = {
   sumLat: number[];
   sumLng: number[];
   wardCount: number;
-  uncovered: number;
 };
 
 const COVERAGE_R_KM = 15;
-const d2 = (a: [number, number], b: [number, number]) => (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2;
 
 function centroidOf(f: Feat): [number, number] {
   const ring = f.geometry.coordinates?.[0]?.[0];
@@ -88,11 +86,9 @@ function assign(feats: Feat[], bcs: CoverageBcLite[]): Assign {
   const cnt = new Array(K).fill(0), area = new Array(K).fill(0);
   const sumLat = new Array(K).fill(0), sumLng = new Array(K).fill(0);
   const wardBc = new Map<string, number>();
-  if (K === 0) return { wardBc, cnt, area, sumLat, sumLng, wardCount: n, uncovered: n };
-  const cent = feats.map(centroidOf);
-  const wba = new Array(n).fill(0);
+  if (K === 0) return { wardBc, cnt, area, sumLat, sumLng, wardCount: n };
   for (let i = 0; i < n; i++) {
-    const p = cent[i];
+    const p = centroidOf(feats[i]);
     const cosLat = Math.cos((p[0] * Math.PI) / 180);
     let bj = 0, bd = Infinity;
     for (let a = 0; a < K; a++) {
@@ -101,23 +97,36 @@ function assign(feats: Feat[], bcs: CoverageBcLite[]): Assign {
       const dd = dlat * dlat + dlng * dlng;
       if (dd < bd) { bd = dd; bj = a; }
     }
-    wba[i] = bj;
     wardBc.set(String(feats[i].properties.wardCode ?? i), bj);
     cnt[bj] += 1; area[bj] += featureAreaKm2(feats[i]);
     sumLat[bj] += p[0]; sumLng[bj] += p[1];
   }
-  // marker = tâm cụm phường; phường xa tâm cụm > bán kính phục vụ = chưa có BC
-  const cLat = sumLat.map((s, a) => (cnt[a] ? s / cnt[a] : 0));
-  const cLng = sumLng.map((s, a) => (cnt[a] ? s / cnt[a] : 0));
-  const rDeg = COVERAGE_R_KM / 111.32;
+  return { wardBc, cnt, area, sumLat, sumLng, wardCount: n };
+}
+
+type UncWard = { code: string; name: string; prov: string };
+// Phường "chưa có BC phụ trách" = xa BC GẦN NHẤT (toàn bộ BC cả nước) > bán kính phục vụ.
+// Tính theo allBcs cố định (không phụ thuộc scope) → cộng dồn tỉnh→vùng→cả nước khớp nhau.
+function coverage(feats: Feat[], allBcs: CoverageBcLite[]): { uncovered: number; list: UncWard[] } {
+  if (!allBcs.length) return { uncovered: feats.length, list: [] };
+  const rDeg = COVERAGE_R_KM / 111.32, r2 = rDeg * rDeg;
   let uncovered = 0;
-  for (let i = 0; i < n; i++) {
-    const a = wba[i];
-    const dlat = cent[i][0] - cLat[a];
-    const dlng = (cent[i][1] - cLng[a]) * Math.cos((cent[i][0] * Math.PI) / 180);
-    if (Math.sqrt(dlat * dlat + dlng * dlng) > rDeg) uncovered += 1;
+  const list: UncWard[] = [];
+  for (const f of feats) {
+    const p = centroidOf(f);
+    const cosLat = Math.cos((p[0] * Math.PI) / 180);
+    let bd = Infinity;
+    for (const b of allBcs) {
+      const dlat = p[0] - b.lat, dlng = (p[1] - b.lng) * cosLat;
+      const dd = dlat * dlat + dlng * dlng;
+      if (dd < bd) { bd = dd; if (bd <= r2) break; }
+    }
+    if (bd > r2) {
+      uncovered += 1;
+      list.push({ code: String(f.properties.wardCode ?? ""), name: f.properties.wardName ?? "", prov: f.properties.provinceName ?? "" });
+    }
   }
-  return { wardBc, cnt, area, sumLat, sumLng, wardCount: n, uncovered };
+  return { uncovered, list };
 }
 
 function fetchMerge(srcs: string[]): Promise<Geo> {
@@ -152,11 +161,17 @@ function FitWard({ bounds, tick }: { bounds: [[number, number], [number, number]
 
 const STATUS_LABEL: Record<string, string> = { red: "Cần xử lý", amber: "Theo dõi", green: "Ổn" };
 
+export type CoverageStats = {
+  newWards: number; newUncovered: number; oldWards: number; oldUncovered: number;
+  newUncoveredList: UncWard[]; oldUncoveredList: UncWard[];
+} | null;
+
 export function CoverageMap({
   srcs,
   otherSrcs,
   dvhc,
   bcs,
+  allBcs,
   mode,
   bcCodes,
   wardCodes,
@@ -175,17 +190,18 @@ export function CoverageMap({
   otherSrcs: string[];
   dvhc: Dvhc;
   bcs: CoverageBcLite[];
+  allBcs: CoverageBcLite[];
   mode: CoverageMode;
   bcCodes: string[];
   wardCodes: string[];
   clickedWard: string | null;
-  onClickWard: (code: string) => void;
+  onClickWard: (code: string, additive: boolean) => void;
   onToggleBc: (code: string) => void;
   profileBcCode: string | null;
   selectedProfile: TerritoryBc | null;
   wardFocusTick: number;
   onWardsLoaded: (wards: { code: string; name: string; prov: string }[]) => void;
-  onStats: (s: { newWards: number; newUncovered: number; oldWards: number; oldUncovered: number } | null) => void;
+  onStats: (s: CoverageStats) => void;
   scopeLabel: string;
   height?: number | string;
 }) {
@@ -224,6 +240,9 @@ export function CoverageMap({
 
   const active = useMemo(() => (geo ? assign(geo.features, bcs) : null), [geo, bcs]);
   const other = useMemo(() => (otherGeo ? assign(otherGeo.features, bcs) : null), [otherGeo, bcs]);
+  // coverage theo allBcs (cố định toàn quốc) → cộng dồn khớp tỉnh→vùng→cả nước
+  const activeCov = useMemo(() => (geo ? coverage(geo.features, allBcs) : null), [geo, allBcs]);
+  const otherCov = useMemo(() => (otherGeo ? coverage(otherGeo.features, allBcs) : null), [otherGeo, allBcs]);
   const wardMeta = useMemo(() => {
     const m = new Map<string, { name: string; prov: string }>();
     geo?.features.forEach((f) => m.set(String(f.properties.wardCode ?? ""), { name: f.properties.wardName ?? "", prov: f.properties.provinceName ?? "" }));
@@ -262,16 +281,19 @@ export function CoverageMap({
     [hlWard, hlBc, active, bcs],
   );
 
-  // Bảng thống kê
+  // Bảng thống kê (coverage theo allBcs → cộng dồn khớp các cấp)
   useEffect(() => {
-    if (!active || !other) { onStats(null); return; }
-    const a = { wards: active.wardCount, unc: active.uncovered };
-    const o = { wards: other.wardCount, unc: other.uncovered };
+    if (!active || !other || !activeCov || !otherCov) { onStats(null); return; }
+    const a = { wards: active.wardCount, unc: activeCov.uncovered, list: activeCov.list };
+    const o = { wards: other.wardCount, unc: otherCov.uncovered, list: otherCov.list };
     const nw = dvhc === "new" ? a : o;
     const od = dvhc === "new" ? o : a;
-    onStats({ newWards: nw.wards, newUncovered: nw.unc, oldWards: od.wards, oldUncovered: od.unc });
+    onStats({
+      newWards: nw.wards, newUncovered: nw.unc, oldWards: od.wards, oldUncovered: od.unc,
+      newUncoveredList: nw.list, oldUncoveredList: od.list,
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, other, dvhc]);
+  }, [active, other, activeCov, otherCov, dvhc]);
 
   const styleFn = useCallback(
     (feature?: { properties?: { wardCode?: string } }): PathOptions => {
@@ -296,7 +318,10 @@ export function CoverageMap({
     const name = feature.properties.wardName ?? "";
     const prov = feature.properties.provinceName ?? "";
     (layer as Layer & { bindTooltip: (s: string) => void }).bindTooltip(prov ? `${name} · ${prov}` : name);
-    layer.on("click", () => onClickWard(code));
+    // Ctrl/Cmd + click → chọn nhiều phường; click thường → 1 phường + highlight BC
+    layer.on("click", (e: { originalEvent?: MouseEvent }) =>
+      onClickWard(code, !!(e.originalEvent?.ctrlKey || e.originalEvent?.metaKey)),
+    );
   }, [onClickWard]);
 
   // bounds toàn scope (dùng khi không lọc, hoặc mode "all")
@@ -366,12 +391,12 @@ export function CoverageMap({
           />
         )}
 
-        {markers.map((m) => {
+        {markers.map((m, mi) => {
           const isHl = hlBc.has(m.code);
           if (mode === "only" && filterActive && !isHl) return null;
           return (
             <CircleMarker
-              key={m.code}
+              key={`${m.code}-${mi}`}
               center={[m.lat, m.lng]}
               radius={isHl ? 7 : 4}
               pathOptions={{ color: "#fff", fillColor: isHl ? BC_SEL : BC_DOT, fillOpacity: 1, weight: isHl ? 2 : 1.2 }}
@@ -426,7 +451,7 @@ export function CoverageMap({
               <div className="text-[var(--color-text-muted)]">{wardInfo.prov}</div>
               <div className="text-[10px] font-mono text-[var(--color-text-faint)]">{wardInfo.code}</div>
             </div>
-            <button type="button" onClick={() => onClickWard("")} className="ml-auto text-[var(--color-text-muted)] hover:text-[var(--color-text)]" aria-label="Đóng">✕</button>
+            <button type="button" onClick={() => onClickWard("", false)} className="ml-auto text-[var(--color-text-muted)] hover:text-[var(--color-text)]" aria-label="Đóng">✕</button>
           </div>
           <div className="mt-2 pt-2 border-t border-[var(--color-border)]">
             <div className="text-[10px] uppercase tracking-wide text-[var(--color-text-muted)]">Bưu cục phụ trách (đã highlight)</div>
