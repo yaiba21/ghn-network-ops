@@ -53,9 +53,10 @@ export default function CoveragePage() {
   const [wardFocusTick, setWardFocusTick] = useState(0);
   const [wardList, setWardList] = useState<{ code: string; name: string; prov: string }[]>([]);
   const [stats, setStats] = useState<Stats>(null);
-  const [openList, setOpenList] = useState<null | "new" | "old">(null);
+  const [openList, setOpenList] = useState<null | "wardNew" | "wardOld" | "bcNoNew" | "bcNoOld">(null);
   const [bcsInScope, setBcsInScope] = useState<string[]>([]);
   const [focusWard, setFocusWard] = useState<string | null>(null);
+  const [focusBc, setFocusBc] = useState<string | null>(null);
   const [focusTick, setFocusTick] = useState(0);
 
   useEffect(() => {
@@ -104,16 +105,22 @@ export default function CoveragePage() {
   }, [manifest, dvhc, regionCode]);
 
   const scopeKey = `${level}|${regionCode}|${provinceSlugs.join(",")}`;
-  useEffect(() => { setBcCodes([]); setWardCodes([]); setClickedWard(null); setFocusWard(null); }, [scopeKey]);
-  // đổi dvhc chỉ reset wardCodes (clickedWard/focusWard giữ để navigate sang bộ kia được)
+  useEffect(() => { setBcCodes([]); setWardCodes([]); setClickedWard(null); setFocusWard(null); setFocusBc(null); }, [scopeKey]);
+  // đổi dvhc chỉ reset wardCodes (clickedWard/focus giữ để navigate sang bộ kia được)
   useEffect(() => { setWardCodes([]); }, [dvhc]);
-  useEffect(() => { setBcCodes([]); setClickedWard(null); }, [pickType]);
+  useEffect(() => { setBcCodes([]); setClickedWard(null); setFocusWard(null); setFocusBc(null); }, [pickType]);
 
   // bấm 1 phường trong danh sách "chưa có BC" → navigate tới polygon đó (đổi ĐVHC nếu cần)
   const focusUncoveredWard = (code: string, system: "new" | "old") => {
-    setBcCodes([]); setWardCodes([]);
+    setBcCodes([]); setWardCodes([]); setFocusBc(null);
     if (system !== dvhc) setDvhc(system);
     setClickedWard(code); setFocusWard(code); setFocusTick((t) => t + 1);
+  };
+  // bấm 1 BC trong danh sách "BC chưa gán" → navigate tới BC đó (xem ở ĐVHC mà BC có phạm vi)
+  const focusBcNav = (id: string, system: "new" | "old") => {
+    setWardCodes([]); setClickedWard(null); setFocusWard(null);
+    if (system !== dvhc) setDvhc(system);
+    setBcCodes([id]); setFocusBc(id); setFocusTick((t) => t + 1);
   };
 
   const activeSlugs = useMemo(() => {
@@ -195,7 +202,8 @@ export default function CoveragePage() {
       </div>
 
       <StatsBar scopeLabel={`${scopeLabel} · ${pickType}`} bcCount={stats?.bcCount ?? bcsInScope.length} stats={stats}
-        openList={openList} onToggleList={(k) => setOpenList((c) => (c === k ? null : k))} onFocusWard={focusUncoveredWard} />
+        openList={openList} onToggleList={(k) => setOpenList((c) => (c === k ? null : k))}
+        onFocusWard={focusUncoveredWard} onFocusBc={focusBcNav} />
 
       <CoverageMap
         srcs={srcs} otherSrcs={otherSrcs} mapSrcs={mapSrcs} otherMapSrcs={otherMapSrcs}
@@ -210,6 +218,7 @@ export default function CoveragePage() {
         selectedBc={selectedBc}
         wardFocusTick={wardFocusTick}
         focusWard={focusWard}
+        focusBc={focusBc}
         focusTick={focusTick}
         onWardsLoaded={setWardList}
         onStats={setStats}
@@ -221,22 +230,34 @@ export default function CoveragePage() {
   );
 }
 
-function StatsBar({ scopeLabel, bcCount, stats, openList, onToggleList, onFocusWard }: {
+function StatsBar({ scopeLabel, bcCount, stats, openList, onToggleList, onFocusWard, onFocusBc }: {
   scopeLabel: string; bcCount: number; stats: Stats;
-  openList: null | "new" | "old"; onToggleList: (k: "new" | "old") => void;
+  openList: null | "wardNew" | "wardOld" | "bcNoNew" | "bcNoOld";
+  onToggleList: (k: "wardNew" | "wardOld" | "bcNoNew" | "bcNoOld") => void;
   onFocusWard: (code: string, system: "new" | "old") => void;
+  onFocusBc: (id: string, system: "new" | "old") => void;
 }) {
+  type LK = "wardNew" | "wardOld" | "bcNoNew" | "bcNoOld";
   const nf = (n: number | undefined) => (n == null ? "…" : n.toLocaleString("vi-VN"));
-  const cells: { label: string; value: string; warn?: boolean; listKey?: "new" | "old"; count?: number }[] = [
+  const cells: { label: string; value: string; warn?: boolean; listKey?: LK; count?: number }[] = [
     { label: "Số lượng BC", value: nf(bcCount) },
-    { label: "BC chưa gán P.mới", value: nf(stats?.bcNoNew), warn: !!stats?.bcNoNew },
-    { label: "BC chưa gán P.cũ", value: nf(stats?.bcNoOld), warn: !!stats?.bcNoOld },
+    { label: "BC chưa gán P.mới", value: nf(stats?.bcNoNew), warn: !!stats?.bcNoNew, listKey: "bcNoNew", count: stats?.bcNoNew ?? 0 },
+    { label: "BC chưa gán P.cũ", value: nf(stats?.bcNoOld), warn: !!stats?.bcNoOld, listKey: "bcNoOld", count: stats?.bcNoOld ?? 0 },
     { label: "Phường MỚI", value: nf(stats?.newWards) },
-    { label: "Phường mới chưa có BC", value: nf(stats?.newUncovered), warn: !!stats?.newUncovered, listKey: "new", count: stats?.newUncovered ?? 0 },
+    { label: "Phường mới chưa có BC", value: nf(stats?.newUncovered), warn: !!stats?.newUncovered, listKey: "wardNew", count: stats?.newUncovered ?? 0 },
     { label: "Phường CŨ", value: nf(stats?.oldWards) },
-    { label: "Phường cũ chưa có BC", value: nf(stats?.oldUncovered), warn: !!stats?.oldUncovered, listKey: "old", count: stats?.oldUncovered ?? 0 },
+    { label: "Phường cũ chưa có BC", value: nf(stats?.oldUncovered), warn: !!stats?.oldUncovered, listKey: "wardOld", count: stats?.oldUncovered ?? 0 },
   ];
-  const list: UncWard[] = openList === "new" ? stats?.newUncoveredList ?? [] : openList === "old" ? stats?.oldUncoveredList ?? [] : [];
+  const isBc = openList === "bcNoNew" || openList === "bcNoOld";
+  const wardList: UncWard[] = openList === "wardNew" ? stats?.newUncoveredList ?? [] : openList === "wardOld" ? stats?.oldUncoveredList ?? [] : [];
+  const bcList = openList === "bcNoNew" ? stats?.bcNoNewList ?? [] : openList === "bcNoOld" ? stats?.bcNoOldList ?? [] : [];
+  // BC chưa gán P.mới → có phạm vi ở CŨ; BC chưa gán P.cũ → ở MỚI
+  const bcSystem: "new" | "old" = openList === "bcNoNew" ? "old" : "new";
+  const wardSystem: "new" | "old" = openList === "wardOld" ? "old" : "new";
+  const total = isBc ? bcList.length : wardList.length;
+  const heading = isBc
+    ? `Danh sách BC chưa gán phường ${openList === "bcNoNew" ? "MỚI" : "CŨ"} (${total}) — bấm để xem BC trên bản đồ`
+    : `Danh sách phường ${openList === "wardNew" ? "MỚI" : "CŨ"} chưa có BC phụ trách (${total}) — bấm để xem trên bản đồ`;
   return (
     <div className="rounded-md border border-[var(--color-border)] bg-white overflow-hidden">
       <div className="px-3 py-1.5 text-[11px] uppercase tracking-wide text-[var(--color-text-muted)] border-b border-[var(--color-border)]">Thống kê — {scopeLabel}</div>
@@ -255,17 +276,27 @@ function StatsBar({ scopeLabel, bcCount, stats, openList, onToggleList, onFocusW
       </div>
       {openList && (
         <div className="border-t border-[var(--color-border)] bg-[var(--color-hover)]/40">
-          <div className="px-3 py-1.5 text-[11px] text-[var(--color-text-muted)]">Danh sách phường {openList === "new" ? "MỚI" : "CŨ"} chưa có BC phụ trách ({list.length}) — bấm để xem trên bản đồ</div>
+          <div className="px-3 py-1.5 text-[11px] text-[var(--color-text-muted)]">{heading}</div>
           <div className="max-h-44 overflow-auto px-2 pb-2 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-3 gap-y-0.5">
-            {list.length === 0 ? <div className="text-xs text-[var(--color-text-muted)] px-1">—</div> : (
+            {total === 0 ? <div className="text-xs text-[var(--color-text-muted)] px-1">—</div> : isBc ? (
               <>
-                {list.slice(0, 400).map((w, i) => (
-                  <button key={`${w.code}-${i}`} type="button" onClick={() => onFocusWard(w.code, openList)}
+                {bcList.slice(0, 400).map((b, i) => (
+                  <button key={`${b.id}-${i}`} type="button" onClick={() => onFocusBc(b.id, bcSystem)}
+                    className="text-xs text-[var(--color-text)] truncate text-left hover:text-[var(--color-ghn-red)] hover:underline" title={`${b.name} · ${b.prov} — bấm để xem`}>
+                    {b.name}<span className="text-[var(--color-text-faint)]"> · {b.prov}</span>
+                  </button>
+                ))}
+                {bcList.length > 400 && <div className="text-xs text-[var(--color-text-muted)] px-1">… +{(bcList.length - 400).toLocaleString("vi-VN")} BC nữa</div>}
+              </>
+            ) : (
+              <>
+                {wardList.slice(0, 400).map((w, i) => (
+                  <button key={`${w.code}-${i}`} type="button" onClick={() => onFocusWard(w.code, wardSystem)}
                     className="text-xs text-[var(--color-text)] truncate text-left hover:text-[var(--color-ghn-red)] hover:underline" title={`${w.name} · ${w.prov} — bấm để xem`}>
                     {w.name}<span className="text-[var(--color-text-faint)]"> · {w.prov}</span>
                   </button>
                 ))}
-                {list.length > 400 && <div className="text-xs text-[var(--color-text-muted)] px-1">… +{(list.length - 400).toLocaleString("vi-VN")} phường nữa</div>}
+                {wardList.length > 400 && <div className="text-xs text-[var(--color-text-muted)] px-1">… +{(wardList.length - 400).toLocaleString("vi-VN")} phường nữa</div>}
               </>
             )}
           </div>

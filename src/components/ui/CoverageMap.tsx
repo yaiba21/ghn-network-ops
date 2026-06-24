@@ -22,10 +22,12 @@ export type BcInfo = {
   wardCode: string; wardName: string; address: string; lat: number | null; lng: number | null;
   area?: Record<PickType, AreaCell>;
 };
+export type BcLite = { id: string; name: string; prov: string };
 export type CoverageStats = {
   newWards: number; newUncovered: number; oldWards: number; oldUncovered: number;
   newUncoveredList: UncWard[]; oldUncoveredList: UncWard[];
   bcCount: number; bcNoNew: number; bcNoOld: number;
+  bcNoNewList: BcLite[]; bcNoOldList: BcLite[];
 } | null;
 
 // Loại hình vận hành BC (suy từ DELIVERY/PICK/RETURN theo phường mới/cũ)
@@ -124,7 +126,7 @@ function FitBounds({ bounds }: { bounds: [[number, number], [number, number]] | 
 export function CoverageMap({
   srcs, otherSrcs, mapSrcs, otherMapSrcs, bcById, dvhc, mode,
   bcCodes, wardCodes, clickedWard, onClickWard, onToggleBc,
-  selectedBc, wardFocusTick, focusWard, focusTick, onWardsLoaded, onStats, onBcsInScope,
+  selectedBc, wardFocusTick, focusWard, focusBc, focusTick, onWardsLoaded, onStats, onBcsInScope,
   scopeLabel, height = 640,
 }: {
   srcs: string[]; otherSrcs: string[]; mapSrcs: string[]; otherMapSrcs: string[];
@@ -136,6 +138,7 @@ export function CoverageMap({
   selectedBc: BcInfo | null;
   wardFocusTick: number;
   focusWard: string | null;
+  focusBc: string | null;
   focusTick: number;
   onWardsLoaded: (wards: { code: string; name: string; prov: string }[]) => void;
   onStats: (s: CoverageStats) => void;
@@ -219,12 +222,15 @@ export function CoverageMap({
     const a = calc(geo, wmap), o = calc(otherGeo, otherMap);
     const nw = dvhc === "new" ? a : o, od = dvhc === "new" ? o : a;
     const total = bcSets.union.size;
-    const bcNoNew = [...bcSets.union].filter((id) => !bcSets.bcsNew.has(id)).length;
-    const bcNoOld = [...bcSets.union].filter((id) => !bcSets.bcsOld.has(id)).length;
+    const noNewIds = [...bcSets.union].filter((id) => !bcSets.bcsNew.has(id));
+    const noOldIds = [...bcSets.union].filter((id) => !bcSets.bcsOld.has(id));
+    const mk = (ids: string[]): BcLite[] => ids.map((id) => { const b = bcById[id]; return { id, name: b?.name ?? id, prov: b?.province ?? "" }; })
+      .sort((a, b) => a.name.localeCompare(b.name, "vi"));
     onStats({ newWards: nw.wards, newUncovered: nw.unc, oldWards: od.wards, oldUncovered: od.unc,
-      newUncoveredList: nw.list, oldUncoveredList: od.list, bcCount: total, bcNoNew, bcNoOld });
+      newUncoveredList: nw.list, oldUncoveredList: od.list, bcCount: total, bcNoNew: noNewIds.length, bcNoOld: noOldIds.length,
+      bcNoNewList: mk(noNewIds), bcNoOldList: mk(noOldIds) });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [geo, otherGeo, wmap, otherMap, dvhc, bcSets]);
+  }, [geo, otherGeo, wmap, otherMap, dvhc, bcSets, bcById]);
 
   const { hlBc, hlWard, filterActive } = useMemo(() => {
     const hb = new Set(bcCodes); const hw = new Set(wardCodes);
@@ -290,10 +296,21 @@ export function CoverageMap({
       const f = geo.features.find((x) => String(x.properties.wardCode ?? "") === focusWard);
       if (f) return featureBounds(f);
     }
+    if (focusBc && geo && wmap) {
+      let a = 90, b = -90, c = 180, d = -180, has = false;
+      for (const f of geo.features) {
+        if (wmap[String(f.properties.wardCode ?? "")] !== focusBc) continue;
+        const [lat, lng] = centroidOf(f); has = true;
+        if (lat < a) a = lat; if (lat > b) b = lat; if (lng < c) c = lng; if (lng > d) d = lng;
+      }
+      if (has) return [[a, c], [b, d]];
+      const bc = bcById[focusBc];
+      if (bc?.lat != null) return [[bc.lat - 0.05, bc.lng! - 0.05], [bc.lat + 0.05, bc.lng! + 0.05]];
+    }
     if (mode === "only" && dropdownActive && filterBounds) return filterBounds;
     return scopeBounds;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focusWard, geo, mode, dropdownActive, filterBounds, scopeBounds, focusTick, wardFocusTick]);
+  }, [focusWard, focusBc, geo, wmap, bcById, mode, dropdownActive, filterBounds, scopeBounds, focusTick, wardFocusTick]);
 
   const wardInfo = useMemo(() => {
     if (!clickedWard) return null;
