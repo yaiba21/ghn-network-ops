@@ -22,6 +22,7 @@ type Props<V extends string> = {
   disabled?: boolean;
   align?: "left" | "right";
   width?: number | string;
+  maxVisible?: number; // giới hạn số option render (list lớn) — gõ để tìm thêm
 };
 
 export function Select<V extends string = string>({
@@ -36,6 +37,7 @@ export function Select<V extends string = string>({
   disabled = false,
   align = "left",
   width,
+  maxVisible,
 }: Props<V>) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -60,9 +62,11 @@ export function Select<V extends string = string>({
   }, [open]);
 
   const selected = options.find((o) => o.value === value);
-  const filtered = q
+  const filteredAll = q
     ? options.filter((o) => o.label.toLowerCase().includes(q.toLowerCase()))
     : options;
+  const truncated = maxVisible != null && filteredAll.length > maxVisible;
+  const filtered = truncated ? filteredAll.slice(0, maxVisible) : filteredAll;
 
   const heightCls = size === "sm" ? "h-8 text-xs" : "h-9 text-sm";
 
@@ -149,6 +153,11 @@ export function Select<V extends string = string>({
                   </li>
                 );
               })
+            )}
+            {truncated && (
+              <li className="px-3 py-2 text-[11px] text-[var(--color-text-muted)] border-t border-[var(--color-border)]">
+                Hiển thị {maxVisible}/{filteredAll.length} — gõ để tìm thêm
+              </li>
             )}
           </ul>
         </div>

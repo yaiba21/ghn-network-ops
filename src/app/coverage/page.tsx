@@ -29,7 +29,6 @@ const REGION_ORDER: RegionCode[] = [
 ];
 const MAP_H = "calc(100vh - 240px)";
 
-// Chuẩn hoá tên tỉnh để map sang app province code (cho danh sách + vị trí bưu cục).
 function normName(s: string): string {
   let x = s.replace(/Đ/g, "D").replace(/đ/g, "d").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
   x = x.replace(/tp\.?/g, "").replace(/thanh pho/g, "").replace(/\btinh\b/g, "").replace(/thua thien/g, "").replace(/ba ria - /g, "");
@@ -44,12 +43,14 @@ export default function CoveragePage() {
   const [regionCode, setRegionCode] = useState<RegionSel>("HCM");
   const [provinceSlug, setProvinceSlug] = useState<string>("ho-chi-minh");
   const [selectedBcCode, setSelectedBcCode] = useState<string | null>(null);
+  const [selectedWardCode, setSelectedWardCode] = useState<string | null>(null);
+  const [wardFocusTick, setWardFocusTick] = useState(0);
+  const [wardList, setWardList] = useState<{ code: string; name: string; prov: string }[]>([]);
 
   useEffect(() => {
     fetch("/coverage/manifest.json").then((r) => r.json()).then(setManifest).catch(() => {});
   }, []);
 
-  // app province code theo tên (cho bưu cục)
   const appByNorm = useMemo(() => {
     const m = new Map<string, string>();
     getProvinces().forEach((p) => m.set(normName(p.name), p.code));
@@ -65,22 +66,25 @@ export default function CoveragePage() {
     ...REGION_ORDER.map((c) => ({ value: c as RegionSel, label: `${c} · ${REGION_LABEL_VI[c]}` })),
   ];
 
-  // đảm bảo provinceSlug hợp lệ khi đổi cũ/mới
+  // đổi cũ/mới mà tỉnh hiện tại còn slug hợp lệ thì GIỮ NGUYÊN; không thì fallback
   useEffect(() => {
     if (provinceOpts.length && !provinceOpts.some((o) => o.value === provinceSlug)) {
       setProvinceSlug(provinceOpts[0].value);
     }
   }, [provinceOpts, provinceSlug]);
 
-  // reset BC đang chọn khi đổi scope
+  // reset BC khi đổi SCOPE (không reset khi chỉ đổi cũ/mới — danh sách BC giữ nguyên)
   useEffect(() => {
     setSelectedBcCode(null);
+  }, [level, regionCode, provinceSlug]);
+
+  // reset phường khi đổi scope hoặc cũ/mới (bộ phường khác nhau)
+  useEffect(() => {
+    setSelectedWardCode(null);
   }, [level, regionCode, provinceSlug, dvhc]);
 
-  const selProvinceName =
-    provinceOpts.find((o) => o.value === provinceSlug)?.label ?? provinceSlug;
+  const selProvinceName = provinceOpts.find((o) => o.value === provinceSlug)?.label ?? provinceSlug;
 
-  // app province code của tỉnh đang chọn (mới: khớp tên; cũ: oldToNew → tên mới → app code)
   const appCode = useMemo(() => {
     if (level !== "province") return "";
     if (dvhc === "new") return appByNorm.get(normName(selProvinceName)) ?? "";
@@ -88,17 +92,18 @@ export default function CoveragePage() {
     return newName ? appByNorm.get(normName(newName)) ?? "" : "";
   }, [level, dvhc, selProvinceName, provinceSlug, manifest, appByNorm]);
 
-  const src =
+  const pathFor = (d: Dvhc) =>
     level === "region"
-      ? `/coverage/${dvhc}/region/${regionCode}.geojson`
-      : `/coverage/${dvhc}/province/${provinceSlug}.geojson`;
+      ? `/coverage/${d}/region/${regionCode}.geojson`
+      : `/coverage/${d}/province/${provinceSlug}.geojson`;
+  const src = pathFor(dvhc);
+  const otherSrc = pathFor(dvhc === "new" ? "old" : "new");
 
   const scopeLabel =
     level === "region"
       ? regionCode === "ALL" ? "cả nước" : `vùng ${REGION_LABEL_VI[regionCode as RegionCode]}`
       : `tỉnh ${selProvinceName}`;
 
-  // danh sách BC theo scope (lọc theo vùng / tỉnh / cả nước)
   const bcs = useMemo(() => {
     if (level === "region") {
       return regionCode === "ALL"
@@ -112,6 +117,10 @@ export default function CoveragePage() {
     () => bcs.map((b) => ({ value: b.code, label: `${b.code} · ${b.name}` })),
     [bcs],
   );
+  const wardOpts = useMemo(
+    () => wardList.map((w) => ({ value: w.code, label: w.prov ? `${w.name} · ${w.prov}` : w.name })),
+    [wardList],
+  );
 
   const selectedProfile = useMemo(
     () => (selectedBcCode ? getBcProfile(filter, selectedBcCode) : null),
@@ -123,31 +132,22 @@ export default function CoveragePage() {
       <PageHeader
         breadcrumb={[{ label: "GHN Network Ops", href: "/" }, { label: "Phạm vi BC" }]}
         title="Phạm vi BC"
-        subtitle="Bản đồ ranh giới phường/xã thật + vị trí bưu cục. Chọn ĐVHC (cũ/mới), xem theo Cả nước / Vùng / Tỉnh, hoặc chọn 1 bưu cục để xem phạm vi phụ trách."
+        subtitle="Bản đồ ranh giới phường/xã thật + vị trí bưu cục. Chọn ĐVHC (cũ/mới — màu khác nhau), xem theo Cả nước / Vùng / Tỉnh, lọc tới Phường/xã, hoặc chọn 1 bưu cục để xem phạm vi phụ trách."
       />
 
       <div className="flex flex-wrap items-end gap-3">
-        {/* ĐVHC cũ / mới */}
         <Toggle
           label="Đơn vị hành chính"
           value={dvhc}
-          options={[
-            { v: "new", l: "ĐVHC mới" },
-            { v: "old", l: "ĐVHC cũ" },
-          ]}
+          options={[{ v: "new", l: "ĐVHC mới" }, { v: "old", l: "ĐVHC cũ" }]}
           onChange={(v) => setDvhc(v as Dvhc)}
         />
-        {/* Cấp xem */}
         <Toggle
           label="Cấp xem"
           value={level}
-          options={[
-            { v: "region", l: "Vùng / Cả nước" },
-            { v: "province", l: "Theo tỉnh" },
-          ]}
+          options={[{ v: "region", l: "Vùng / Cả nước" }, { v: "province", l: "Theo tỉnh" }]}
           onChange={(v) => setLevel(v as Level)}
         />
-        {/* Selector vùng / tỉnh */}
         {level === "region" ? (
           <DimensionSelect
             label="Vùng"
@@ -155,7 +155,7 @@ export default function CoveragePage() {
             options={regionOpts}
             onChange={(v) => v && setRegionCode(v as RegionSel)}
             allOptionLabel="Chọn vùng"
-            width={220}
+            width={210}
             searchable
           />
         ) : (
@@ -165,37 +165,55 @@ export default function CoveragePage() {
             options={provinceOpts}
             onChange={(v) => v && setProvinceSlug(v)}
             allOptionLabel="Chọn tỉnh"
-            width={220}
+            width={210}
             searchable
           />
         )}
-        {/* Chọn bưu cục */}
+        {/* Phường / xã — lọc theo scope đang xem */}
+        <DimensionSelect
+          label={`Phường/xã (${wardList.length})`}
+          value={selectedWardCode ?? undefined}
+          options={wardOpts}
+          onChange={(v) => { setSelectedWardCode(v ?? null); if (v) setWardFocusTick((t) => t + 1); }}
+          allOptionLabel="Tất cả phường/xã"
+          width={230}
+          searchable
+          maxVisible={200}
+        />
+        {/* Bưu cục */}
         <DimensionSelect
           label={`Bưu cục (${bcs.length})`}
           value={selectedBcCode ?? undefined}
           options={bcOpts}
           onChange={(v) => setSelectedBcCode(v ?? null)}
           allOptionLabel="Tất cả bưu cục"
-          width={260}
+          width={240}
           searchable
+          maxVisible={200}
         />
-        {selectedBcCode && (
+        {(selectedBcCode || selectedWardCode) && (
           <button
             type="button"
-            onClick={() => setSelectedBcCode(null)}
+            onClick={() => { setSelectedBcCode(null); setSelectedWardCode(null); }}
             className="px-3 py-1.5 text-sm rounded-md border border-[var(--color-border)] bg-white text-[var(--color-text)] hover:bg-[var(--color-hover)]"
           >
-            Bỏ chọn BC
+            Bỏ chọn
           </button>
         )}
       </div>
 
       <CoverageMap
         src={src}
+        otherSrc={otherSrc}
+        dvhc={dvhc}
         bcs={bcs}
         selectedBcCode={selectedBcCode}
         selectedProfile={selectedProfile}
         onSelectBc={setSelectedBcCode}
+        selectedWardCode={selectedWardCode}
+        onSelectWard={(code) => setSelectedWardCode(code || null)}
+        wardFocusTick={wardFocusTick}
+        onWardsLoaded={setWardList}
         scopeLabel={scopeLabel}
         height={MAP_H}
       />
@@ -216,9 +234,7 @@ function Toggle({
 }) {
   return (
     <div>
-      <div className="text-[11px] uppercase tracking-wide text-[var(--color-text-muted)] mb-1">
-        {label}
-      </div>
+      <div className="text-[11px] uppercase tracking-wide text-[var(--color-text-muted)] mb-1">{label}</div>
       <div className="inline-flex rounded-md border border-[var(--color-border)] overflow-hidden">
         {options.map((o) => (
           <button

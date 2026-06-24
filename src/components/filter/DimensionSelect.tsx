@@ -11,6 +11,7 @@ type Props<V extends string> = {
   disabled?: boolean;
   width?: number | string;
   searchable?: boolean;
+  maxVisible?: number;
 };
 
 // Wraps Select with a synthetic "(all)" option that clears the filter.
@@ -23,6 +24,7 @@ export function DimensionSelect<V extends string>({
   disabled,
   width = 180,
   searchable,
+  maxVisible,
 }: Props<V>) {
   const ALL = "__all__" as const;
   type Opt = SelectOption<V | typeof ALL>;
@@ -40,6 +42,7 @@ export function DimensionSelect<V extends string>({
       disabled={disabled}
       width={width}
       searchable={searchable}
+      maxVisible={maxVisible}
       size="md"
     />
   );
