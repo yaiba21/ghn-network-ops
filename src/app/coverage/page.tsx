@@ -21,8 +21,11 @@ type RegionSel = RegionCode | "ALL";
 type Manifest = {
   old: { provinces: { slug: string; name: string }[]; regions: string[] };
   new: { provinces: { slug: string; name: string }[]; regions: string[] };
-  oldToNew?: Record<string, string>; // slug tỉnh cũ → tên tỉnh mới
+  oldToNew?: Record<string, string>;       // slug tỉnh cũ → tên tỉnh mới
+  provinceRegion?: Record<string, string>; // slug tỉnh → vùng app
 };
+type Stats = { newWards: number; newUncovered: number; oldWards: number; oldUncovered: number } | null;
+const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
 const REGION_ORDER: RegionCode[] = [
   "HCM", "HNO", "DSH", "DNB", "DCL", "TNB", "DBB", "BTB", "TTB", "NTB", "TNG", "TNT", "XBG", "TBB",
@@ -46,6 +49,7 @@ export default function CoveragePage() {
   const [selectedWardCode, setSelectedWardCode] = useState<string | null>(null);
   const [wardFocusTick, setWardFocusTick] = useState(0);
   const [wardList, setWardList] = useState<{ code: string; name: string; prov: string }[]>([]);
+  const [stats, setStats] = useState<Stats>(null);
 
   useEffect(() => {
     fetch("/coverage/manifest.json").then((r) => r.json()).then(setManifest).catch(() => {});
@@ -61,10 +65,22 @@ export default function CoveragePage() {
     () => (manifest ? manifest[dvhc].provinces.map((p) => ({ value: p.slug, label: p.name })) : []),
     [manifest, dvhc],
   );
-  const regionOpts = [
-    { value: "ALL" as RegionSel, label: "Cả nước (tất cả tỉnh)" },
-    ...REGION_ORDER.map((c) => ({ value: c as RegionSel, label: `${c} · ${REGION_LABEL_VI[c]}` })),
-  ];
+  // vùng có sẵn theo ĐVHC hiện tại (new thiếu XBG/TNB vì đã sáp nhập)
+  const regionOpts = useMemo(() => {
+    const avail = manifest ? manifest[dvhc].regions : [];
+    const ordered = REGION_ORDER.filter((c) => avail.includes(c));
+    return [
+      { value: "ALL" as RegionSel, label: "Cả nước (tất cả tỉnh)" },
+      ...ordered.map((c) => ({ value: c as RegionSel, label: `${c} · ${REGION_LABEL_VI[c]}` })),
+    ];
+  }, [manifest, dvhc]);
+
+  // đổi cũ/mới mà vùng hiện tại không còn → về Cả nước
+  useEffect(() => {
+    if (regionCode !== "ALL" && manifest && !manifest[dvhc].regions.includes(regionCode)) {
+      setRegionCode("ALL");
+    }
+  }, [manifest, dvhc, regionCode]);
 
   // đổi cũ/mới mà tỉnh hiện tại còn slug hợp lệ thì GIỮ NGUYÊN; không thì fallback
   useEffect(() => {
@@ -104,14 +120,28 @@ export default function CoveragePage() {
       ? regionCode === "ALL" ? "cả nước" : `vùng ${REGION_LABEL_VI[regionCode as RegionCode]}`
       : `tỉnh ${selProvinceName}`;
 
-  const bcs = useMemo(() => {
+  // Danh sách BC theo scope. Tỉnh không khớp tên app → fallback theo VÙNG (provinceRegion)
+  // để không bị mất vị trí BC; fallback thì cap số BC theo số phường cho hợp lý.
+  const { bcsRaw, isFallback } = useMemo(() => {
     if (level === "region") {
-      return regionCode === "ALL"
-        ? getCoverageBcList("all", "")
-        : getCoverageBcList("region", regionCode);
+      return {
+        bcsRaw: regionCode === "ALL" ? getCoverageBcList("all", "") : getCoverageBcList("region", regionCode),
+        isFallback: false,
+      };
     }
-    return appCode ? getCoverageBcList("province", appCode) : [];
-  }, [level, regionCode, appCode]);
+    if (appCode) {
+      const list = getCoverageBcList("province", appCode);
+      if (list.length) return { bcsRaw: list, isFallback: false };
+    }
+    const reg = manifest?.provinceRegion?.[provinceSlug];
+    return { bcsRaw: reg ? getCoverageBcList("region", reg) : [], isFallback: true };
+  }, [level, regionCode, appCode, manifest, provinceSlug]);
+
+  const bcs = useMemo(() => {
+    if (!isFallback || !wardList.length) return bcsRaw;
+    const cap = clamp(Math.ceil(wardList.length / 8), 8, 60);
+    return cap < bcsRaw.length ? bcsRaw.slice(0, cap) : bcsRaw;
+  }, [bcsRaw, isFallback, wardList.length]);
 
   const bcOpts = useMemo(
     () => bcs.map((b) => ({ value: b.code, label: `${b.code} · ${b.name}` })),
@@ -202,6 +232,9 @@ export default function CoveragePage() {
         )}
       </div>
 
+      {/* Bảng thống kê — cập nhật theo filter */}
+      <StatsBar scopeLabel={scopeLabel} bcCount={bcs.length} fallback={isFallback} stats={stats} />
+
       <CoverageMap
         src={src}
         otherSrc={otherSrc}
@@ -214,9 +247,46 @@ export default function CoveragePage() {
         onSelectWard={(code) => setSelectedWardCode(code || null)}
         wardFocusTick={wardFocusTick}
         onWardsLoaded={setWardList}
+        onStats={setStats}
         scopeLabel={scopeLabel}
         height={MAP_H}
       />
+    </div>
+  );
+}
+
+function StatsBar({
+  scopeLabel, bcCount, fallback, stats,
+}: {
+  scopeLabel: string;
+  bcCount: number;
+  fallback: boolean;
+  stats: Stats;
+}) {
+  const nf = (n: number | undefined) => (n == null ? "…" : n.toLocaleString("vi-VN"));
+  const cells: { label: string; value: string; sub?: string; warn?: boolean }[] = [
+    { label: "Số lượng BC", value: nf(bcCount), sub: fallback ? "ước lượng theo vùng" : undefined },
+    { label: "Phường MỚI", value: nf(stats?.newWards) },
+    { label: "Phường mới chưa có BC", value: nf(stats?.newUncovered), warn: !!stats?.newUncovered },
+    { label: "Phường CŨ", value: nf(stats?.oldWards) },
+    { label: "Phường cũ chưa có BC", value: nf(stats?.oldUncovered), warn: !!stats?.oldUncovered },
+  ];
+  return (
+    <div className="rounded-md border border-[var(--color-border)] bg-white overflow-hidden">
+      <div className="px-3 py-1.5 text-[11px] uppercase tracking-wide text-[var(--color-text-muted)] border-b border-[var(--color-border)]">
+        Thống kê — {scopeLabel}
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 divide-x divide-y lg:divide-y-0 divide-[var(--color-border)]">
+        {cells.map((c) => (
+          <div key={c.label} className="px-3 py-2">
+            <div className="text-[11px] text-[var(--color-text-muted)]">{c.label}</div>
+            <div className={cn("text-lg font-semibold", c.warn ? "text-[var(--color-ghn-red)]" : "text-[var(--color-text)]")}>
+              {c.value}
+            </div>
+            {c.sub && <div className="text-[10px] text-[var(--color-text-faint)]">{c.sub}</div>}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

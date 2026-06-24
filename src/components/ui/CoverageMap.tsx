@@ -36,7 +36,11 @@ type Assign = {
   area: number[];              // km² theo bcIdx
   sumLat: number[];
   sumLng: number[];
+  wardCount: number;           // tổng số phường
+  uncovered: number;           // số phường không có BC phụ trách (xa BC > R km)
 };
+
+const COVERAGE_R_KM = 15; // bán kính phục vụ: phường xa BC quá ngưỡng coi như chưa có BC phụ trách
 
 const d2 = (a: [number, number], b: [number, number]) =>
   (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2;
@@ -102,28 +106,40 @@ function farthest(pts: [number, number][], K: number): number[] {
   return chosen;
 }
 
-// Gán phường → BC (nearest neo) + thống kê count/area/tâm theo bcIdx
+// Gán phường → BC (nearest neo) + thống kê count/area/tâm theo bcIdx + đếm phường ngoài bán kính phục vụ
 function assign(feats: Feat[], bcs: CoverageBcLite[]): Assign {
   const n = feats.length;
   const K = Math.min(bcs.length, n);
   const cnt = new Array(K).fill(0), area = new Array(K).fill(0);
   const sumLat = new Array(K).fill(0), sumLng = new Array(K).fill(0);
   const wardBc = new Map<string, number>();
-  if (K > 0) {
-    const cent = feats.map(centroidOf);
-    const anchors = farthest(cent, K);
-    const ax = anchors.map((i) => cent[i]);
-    for (let i = 0; i < n; i++) {
-      const p = cent[i];
-      let ba = 0, bd = Infinity;
-      for (let a = 0; a < K; a++) { const dd = d2(p, ax[a]); if (dd < bd) { bd = dd; ba = a; } }
-      const code = String(feats[i].properties.wardCode ?? i);
-      wardBc.set(code, ba);
-      cnt[ba] += 1; area[ba] += featureAreaKm2(feats[i]);
-      sumLat[ba] += p[0]; sumLng[ba] += p[1];
-    }
+  if (K === 0) return { wardBc, cnt, area, sumLat, sumLng, wardCount: n, uncovered: n };
+
+  const cent = feats.map(centroidOf);
+  const wba = new Array(n).fill(0);
+  const anchors = farthest(cent, K);
+  const ax = anchors.map((i) => cent[i]);
+  for (let i = 0; i < n; i++) {
+    const p = cent[i];
+    let ba = 0, bd = Infinity;
+    for (let a = 0; a < K; a++) { const dd = d2(p, ax[a]); if (dd < bd) { bd = dd; ba = a; } }
+    wba[i] = ba;
+    wardBc.set(String(feats[i].properties.wardCode ?? i), ba);
+    cnt[ba] += 1; area[ba] += featureAreaKm2(feats[i]);
+    sumLat[ba] += p[0]; sumLng[ba] += p[1];
   }
-  return { wardBc, cnt, area, sumLat, sumLng };
+  // phường không có BC phụ trách: khoảng cách tới tâm cụm (vị trí BC) > bán kính phục vụ
+  const cLat = sumLat.map((s, a) => (cnt[a] ? s / cnt[a] : 0));
+  const cLng = sumLng.map((s, a) => (cnt[a] ? s / cnt[a] : 0));
+  const rDeg = COVERAGE_R_KM / 111.32;
+  let uncovered = 0;
+  for (let i = 0; i < n; i++) {
+    const a = wba[i];
+    const dlat = cent[i][0] - cLat[a];
+    const dlng = (cent[i][1] - cLng[a]) * Math.cos((cent[i][0] * Math.PI) / 180);
+    if (Math.sqrt(dlat * dlat + dlng * dlng) > rDeg) uncovered += 1;
+  }
+  return { wardBc, cnt, area, sumLat, sumLng, wardCount: n, uncovered };
 }
 
 function FitBounds({ bounds }: { bounds: [[number, number], [number, number]] | null }) {
@@ -165,6 +181,7 @@ export function CoverageMap({
   onSelectWard,
   wardFocusTick,
   onWardsLoaded,
+  onStats,
   scopeLabel,
   height = 640,
 }: {
@@ -179,13 +196,14 @@ export function CoverageMap({
   onSelectWard: (code: string) => void;
   wardFocusTick: number;
   onWardsLoaded: (wards: { code: string; name: string; prov: string }[]) => void;
+  onStats: (s: { newWards: number; newUncovered: number; oldWards: number; oldUncovered: number } | null) => void;
   scopeLabel: string;
   height?: number | string;
 }) {
   const [geo, setGeo] = useState<Geo | null>(null);
+  const [otherGeo, setOtherGeo] = useState<Geo | null>(null);
   const [loading, setLoading] = useState(true);
   const [noPolygon, setNoPolygon] = useState(false);
-  const [otherInfo, setOtherInfo] = useState<{ src: string; cnt: number[]; area: number[] } | null>(null);
   const geoRef = useRef<LeafletGeoJSON | null>(null);
 
   useEffect(() => {
@@ -212,7 +230,19 @@ export function CoverageMap({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [src]);
 
+  // bộ ĐVHC còn lại (để thống kê phường cũ/mới + diện tích) — load song song
+  useEffect(() => {
+    let cancel = false;
+    setOtherGeo(null);
+    fetch(otherSrc)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((g: Geo | null) => { if (!cancel) setOtherGeo(g && g.features?.length ? g : { type: "FeatureCollection", features: [] }); })
+      .catch(() => { if (!cancel) setOtherGeo({ type: "FeatureCollection", features: [] }); });
+    return () => { cancel = true; };
+  }, [otherSrc]);
+
   const active = useMemo(() => (geo ? assign(geo.features, bcs) : null), [geo, bcs]);
+  const other = useMemo(() => (otherGeo ? assign(otherGeo.features, bcs) : null), [otherGeo, bcs]);
   const wardMeta = useMemo(() => {
     const m = new Map<string, { name: string; prov: string }>();
     geo?.features.forEach((f) =>
@@ -235,22 +265,16 @@ export function CoverageMap({
 
   const selIdx = selectedBcCode ? bcs.findIndex((b) => b.code === selectedBcCode) : -1;
 
-  // Lazy fetch bộ ĐVHC còn lại (để đếm phường cũ/mới + diện tích cho BC đang chọn)
+  // Bảng thống kê theo filter: số phường cũ/mới + số phường không có BC phụ trách
   useEffect(() => {
-    if (!selectedBcCode) return;
-    if (otherInfo?.src === otherSrc) return;
-    let cancel = false;
-    fetch(otherSrc)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((g: Geo | null) => {
-        if (cancel) return;
-        if (!g || !g.features?.length) { setOtherInfo({ src: otherSrc, cnt: [], area: [] }); return; }
-        const a = assign(g.features, bcs);
-        setOtherInfo({ src: otherSrc, cnt: a.cnt, area: a.area });
-      })
-      .catch(() => { if (!cancel) setOtherInfo({ src: otherSrc, cnt: [], area: [] }); });
-    return () => { cancel = true; };
-  }, [selectedBcCode, otherSrc, bcs, otherInfo?.src]);
+    if (!active || !other) { onStats(null); return; }
+    const a = { wards: active.wardCount, unc: active.uncovered };
+    const o = { wards: other.wardCount, unc: other.uncovered };
+    const nw = dvhc === "new" ? a : o;
+    const od = dvhc === "new" ? o : a;
+    onStats({ newWards: nw.wards, newUncovered: nw.unc, oldWards: od.wards, oldUncovered: od.unc });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, other, dvhc]);
 
   const styleFn = useCallback(
     (feature?: { properties?: { wardCode?: string } }): PathOptions => {
@@ -306,13 +330,12 @@ export function CoverageMap({
   const bcWardStats = useMemo(() => {
     if (selIdx < 0 || !active) return null;
     const activeC = active.cnt[selIdx] ?? 0, activeA = active.area[selIdx] ?? 0;
-    const ready = otherInfo?.src === otherSrc;
-    const otherC = ready ? (otherInfo!.cnt[selIdx] ?? 0) : null;
-    const otherA = ready ? (otherInfo!.area[selIdx] ?? 0) : null;
+    const otherC = other ? (other.cnt[selIdx] ?? 0) : null;
+    const otherA = other ? (other.area[selIdx] ?? 0) : null;
     return dvhc === "new"
       ? { newC: activeC, newA: activeA, oldC: otherC, oldA: otherA }
       : { oldC: activeC, oldA: activeA, newC: otherC, newA: otherA };
-  }, [selIdx, active, otherInfo, otherSrc, dvhc]);
+  }, [selIdx, active, other, dvhc]);
 
   return (
     <div
