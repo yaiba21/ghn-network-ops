@@ -11,6 +11,7 @@ import {
 } from "react-leaflet";
 import type { Layer, PathOptions, GeoJSON as LeafletGeoJSON } from "leaflet";
 import "leaflet/dist/leaflet.css";
+import { cn } from "@/lib/utils";
 
 type Dvhc = "new" | "old";
 export type CoverageMode = "all" | "only";
@@ -152,8 +153,11 @@ export function CoverageMap({
   const [otherMap, setOtherMap] = useState<WardMap | null>(null);
   const [loading, setLoading] = useState(true);
   const [noPolygon, setNoPolygon] = useState(false);
+  const [kindFilter, setKindFilter] = useState<BcKind[]>([]); // lọc theo loại hình BC (bấm legend)
   const geoRef = useRef<LeafletGeoJSON | null>(null);
   const srcKey = srcs.join("|");
+  const kindActive = kindFilter.length > 0;
+  const toggleKind = (k: BcKind) => setKindFilter((p) => (p.includes(k) ? p.filter((x) => x !== k) : [...p, k]));
 
   useEffect(() => {
     let cancel = false;
@@ -250,12 +254,17 @@ export function CoverageMap({
     const id = wmap?.[code];
     const kind = id ? bcKindOf(bcById[id], dvhc) : "NONE";
     const col = KIND_COLOR[kind];
-    if (!filterActive) return { color: col.line, weight: 0.4, fillColor: col.fill, fillOpacity: kind === "NONE" ? 0.4 : 0.5 };
+    const dim: PathOptions = mode === "only"
+      ? { opacity: 0, fillOpacity: 0, weight: 0 }
+      : { color: col.line, weight: 0.3, fillColor: col.fill, fillOpacity: 0.1 };
+    if (kindActive && !kindFilter.includes(kind)) return dim;        // lọc theo loại hình BC
     if (code === clickedWard) return { color: CLICK.line, weight: 2.5, fillColor: CLICK.fill, fillOpacity: 0.6 };
-    if (wardInFilter(code)) return { color: HILITE.line, weight: 1.4, fillColor: HILITE.fill, fillOpacity: 0.55 };
-    if (mode === "only") return { opacity: 0, fillOpacity: 0, weight: 0 };
-    return { color: col.line, weight: 0.3, fillColor: col.fill, fillOpacity: 0.14 };
-  }, [wmap, bcById, dvhc, filterActive, clickedWard, wardInFilter, mode]);
+    if (filterActive) {
+      if (wardInFilter(code)) return { color: HILITE.line, weight: 1.4, fillColor: HILITE.fill, fillOpacity: 0.55 };
+      return dim;
+    }
+    return { color: col.line, weight: 0.4, fillColor: col.fill, fillOpacity: kind === "NONE" ? 0.4 : 0.5 };
+  }, [wmap, bcById, dvhc, filterActive, clickedWard, wardInFilter, mode, kindActive, kindFilter]);
 
   useEffect(() => { geoRef.current?.setStyle(styleFn as (f: unknown) => PathOptions); }, [styleFn, geo]);
 
@@ -319,13 +328,34 @@ export function CoverageMap({
     return { code: clickedWard, ...meta, bcName: bc?.name ?? null, bcId: bc?.id ?? null, bcKind: bc ? bcKindOf(bc, dvhc) : null };
   }, [clickedWard, wardMeta, wmap, bcById]);
 
-  const shownWards = filterActive
-    ? geo?.features.filter((f) => wardInFilter(String(f.properties.wardCode ?? ""))).length ?? 0
-    : geo?.features.length ?? 0;
+  const shownWards = useMemo(() => {
+    if (!geo) return 0;
+    return geo.features.filter((f) => {
+      const code = String(f.properties.wardCode ?? "");
+      const id = wmap?.[code];
+      const kind = id ? bcKindOf(bcById[id], dvhc) : "NONE";
+      if (kindActive && !kindFilter.includes(kind)) return false;
+      if (filterActive && !wardInFilter(code)) return false;
+      return true;
+    }).length;
+  }, [geo, wmap, bcById, dvhc, kindActive, kindFilter, filterActive, wardInFilter]);
+  const shownBc = useMemo(
+    () => (kindActive ? markers.filter((m) => kindFilter.includes(m.kind)).length : markers.length),
+    [markers, kindActive, kindFilter],
+  );
   const noBcCount = useMemo(() => {
     if (!geo || !wmap) return 0;
     return geo.features.reduce((n, f) => n + (wmap[String(f.properties.wardCode ?? "")] ? 0 : 1), 0);
   }, [geo, wmap]);
+  // số phường theo loại hình BC (cho legend)
+  const kindCounts = useMemo(() => {
+    const c: Record<BcKind, number> = { MIX: 0, D: 0, P: 0, R: 0, NONE: 0 };
+    if (geo && wmap) for (const f of geo.features) {
+      const id = wmap[String(f.properties.wardCode ?? "")];
+      c[id ? bcKindOf(bcById[id], dvhc) : "NONE"]++;
+    }
+    return c;
+  }, [geo, wmap, bcById, dvhc]);
 
   return (
     <div className="rounded-md overflow-hidden border border-[var(--color-border)] relative" style={{ height, minHeight: 520 }}>
@@ -337,6 +367,7 @@ export function CoverageMap({
             style={styleFn as () => PathOptions} onEachFeature={onEachFeature as (f: unknown, l: Layer) => void} />
         )}
         {markers.map((m, mi) => {
+          if (kindActive && !kindFilter.includes(m.kind)) return null;
           const isHl = hlBc.has(m.id);
           if (mode === "only" && filterActive && !isHl) return null;
           return (
@@ -357,15 +388,24 @@ export function CoverageMap({
       )}
 
       <div className="absolute bottom-2 left-2 z-[1000] bg-white/95 border border-[var(--color-border)] rounded-md px-3 py-2 text-[10px] text-[var(--color-text-muted)] shadow-sm space-y-1 max-w-[260px]">
-        {geo && (<div className="font-medium uppercase tracking-wide">{shownWards} phường/xã · {markers.length} BC {filterActive ? "(đang lọc)" : ""}</div>)}
-        <div className="text-[9px] uppercase tracking-wide">Loại hình BC ({dvhc === "new" ? "phường mới" : "phường cũ"})</div>
-        <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
-          {(["MIX", "D", "P", "R", "NONE"] as BcKind[]).map((k) => (
-            <span key={k} className="inline-flex items-center gap-1">
-              <span className="w-2.5 h-2.5 rounded-sm" style={{ background: KIND_COLOR[k].fill, opacity: k === "NONE" ? 0.5 : 0.75 }} />
-              {KIND_LABEL[k]}{k === "NONE" ? ` (${noBcCount})` : ""}
-            </span>
-          ))}
+        {geo && (<div className="font-medium uppercase tracking-wide">{shownWards} phường/xã · {shownBc} BC {filterActive || kindActive ? "(đang lọc)" : ""}</div>)}
+        <div className="flex items-center justify-between">
+          <span className="text-[9px] uppercase tracking-wide">Loại hình BC ({dvhc === "new" ? "phường mới" : "phường cũ"}) — bấm để lọc</span>
+          {kindActive && <button type="button" onClick={() => setKindFilter([])} className="text-[9px] text-[var(--color-ghn-red)] hover:underline">bỏ lọc</button>}
+        </div>
+        <div className="grid grid-cols-2 gap-x-2 gap-y-0.5">
+          {(["MIX", "D", "P", "R", "NONE"] as BcKind[]).map((k) => {
+            const on = kindFilter.includes(k);
+            return (
+              <button key={k} type="button" onClick={() => toggleKind(k)}
+                className={cn("inline-flex items-center gap-1 px-1 rounded text-left hover:bg-[var(--color-hover)]",
+                  on && "ring-1 ring-[var(--color-ghn-red)] bg-[var(--color-row-selected)] font-medium",
+                  kindActive && !on && "opacity-40")}>
+                <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ background: KIND_COLOR[k].fill, opacity: k === "NONE" ? 0.5 : 0.85 }} />
+                {KIND_LABEL[k]} ({kindCounts[k]})
+              </button>
+            );
+          })}
         </div>
       </div>
 
