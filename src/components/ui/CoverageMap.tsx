@@ -16,13 +16,16 @@ type Dvhc = "new" | "old";
 export type CoverageMode = "all" | "only";
 export type PickType = "DELIVERY" | "PICK" | "RETURN";
 
+type AreaCell = { nC: number; nA: number; oC: number; oA: number };
 export type BcInfo = {
   id: string; name: string; type: string; region: string; province: string;
   wardCode: string; wardName: string; address: string; lat: number | null; lng: number | null;
+  area?: Record<PickType, AreaCell>;
 };
 export type CoverageStats = {
   newWards: number; newUncovered: number; oldWards: number; oldUncovered: number;
   newUncoveredList: UncWard[]; oldUncoveredList: UncWard[];
+  bcCount: number; bcNoNew: number; bcNoOld: number;
 } | null;
 
 const COLORS: Record<Dvhc, { fill: string; line: string }> = {
@@ -100,19 +103,11 @@ function FitBounds({ bounds }: { bounds: [[number, number], [number, number]] | 
   }, [bounds, map]);
   return null;
 }
-function FitWard({ bounds, tick }: { bounds: [[number, number], [number, number]] | null; tick: number }) {
-  const map = useMap();
-  useEffect(() => {
-    if (bounds) map.fitBounds(bounds, { padding: [40, 40], maxZoom: 13 });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tick]);
-  return null;
-}
 
 export function CoverageMap({
   srcs, otherSrcs, mapSrcs, otherMapSrcs, bcById, dvhc, mode,
   bcCodes, wardCodes, clickedWard, onClickWard, onToggleBc,
-  selectedBc, wardFocusTick, onWardsLoaded, onStats, onBcsInScope,
+  selectedBc, wardFocusTick, focusWard, focusTick, onWardsLoaded, onStats, onBcsInScope,
   scopeLabel, height = 640,
 }: {
   srcs: string[]; otherSrcs: string[]; mapSrcs: string[]; otherMapSrcs: string[];
@@ -123,6 +118,8 @@ export function CoverageMap({
   onToggleBc: (code: string) => void;
   selectedBc: BcInfo | null;
   wardFocusTick: number;
+  focusWard: string | null;
+  focusTick: number;
   onWardsLoaded: (wards: { code: string; name: string; prov: string }[]) => void;
   onStats: (s: CoverageStats) => void;
   onBcsInScope: (ids: string[]) => void;
@@ -169,19 +166,27 @@ export function CoverageMap({
     return m;
   }, [geo]);
 
-  // BC phục vụ các phường đang hiển thị (theo map thật) → marker + báo về page cho dropdown
-  const markers = useMemo(() => {
-    if (!geo || !wmap) return [] as { id: string; name: string; lat: number; lng: number }[];
-    const ids = new Set<string>();
-    for (const f of geo.features) { const id = wmap[String(f.properties.wardCode ?? "")]; if (id) ids.add(id); }
-    const out: { id: string; name: string; lat: number; lng: number }[] = [];
-    ids.forEach((id) => { const b = bcById[id]; if (b && b.lat != null && b.lng != null) out.push({ id, name: b.name, lat: b.lat, lng: b.lng }); });
-    return out;
-  }, [geo, wmap, bcById]);
+  // BC phục vụ phường trong scope — TÍNH CHUNG cả cũ + mới (BC đếm 1 lần dù chưa gán bộ nào)
+  const bcSets = useMemo(() => {
+    const active = new Set<string>(), other = new Set<string>();
+    if (geo && wmap) for (const f of geo.features) { const id = wmap[String(f.properties.wardCode ?? "")]; if (id) active.add(id); }
+    if (otherGeo && otherMap) for (const f of otherGeo.features) { const id = otherMap[String(f.properties.wardCode ?? "")]; if (id) other.add(id); }
+    const bcsNew = dvhc === "new" ? active : other;
+    const bcsOld = dvhc === "new" ? other : active;
+    const union = new Set<string>([...bcsNew, ...bcsOld]);
+    return { union, bcsNew, bcsOld };
+  }, [geo, wmap, otherGeo, otherMap, dvhc]);
 
-  useEffect(() => { onBcsInScope(markers.map((m) => m.id));
+  // marker = TẤT CẢ BC trong scope (kể cả BC chưa gán bộ đang xem), tại vị trí thật
+  const markers = useMemo(() => {
+    const out: { id: string; name: string; lat: number; lng: number }[] = [];
+    bcSets.union.forEach((id) => { const b = bcById[id]; if (b && b.lat != null && b.lng != null) out.push({ id, name: b.name, lat: b.lat, lng: b.lng }); });
+    return out;
+  }, [bcSets, bcById]);
+
+  useEffect(() => { onBcsInScope([...bcSets.union]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [markers]);
+  }, [bcSets]);
 
   // thống kê: phường + phường chưa có BC (theo map thật, cố định per phường → cộng dồn khớp)
   useEffect(() => {
@@ -196,11 +201,14 @@ export function CoverageMap({
     };
     const a = calc(geo, wmap), o = calc(otherGeo, otherMap);
     const nw = dvhc === "new" ? a : o, od = dvhc === "new" ? o : a;
-    onStats({ newWards: nw.wards, newUncovered: nw.unc, oldWards: od.wards, oldUncovered: od.unc, newUncoveredList: nw.list, oldUncoveredList: od.list });
+    const total = bcSets.union.size;
+    const bcNoNew = [...bcSets.union].filter((id) => !bcSets.bcsNew.has(id)).length;
+    const bcNoOld = [...bcSets.union].filter((id) => !bcSets.bcsOld.has(id)).length;
+    onStats({ newWards: nw.wards, newUncovered: nw.unc, oldWards: od.wards, oldUncovered: od.unc,
+      newUncoveredList: nw.list, oldUncoveredList: od.list, bcCount: total, bcNoNew, bcNoOld });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [geo, otherGeo, wmap, otherMap, dvhc]);
+  }, [geo, otherGeo, wmap, otherMap, dvhc, bcSets]);
 
-  const selId = selectedBc?.id ?? null;
   const { hlBc, hlWard, filterActive } = useMemo(() => {
     const hb = new Set(bcCodes); const hw = new Set(wardCodes);
     if (clickedWard && wmap) { const id = wmap[clickedWard]; if (id) hb.add(id); hw.add(clickedWard); }
@@ -257,7 +265,16 @@ export function CoverageMap({
     }
     return has ? [[a, c], [b, d]] : null;
   }, [geo, filterActive, wardInFilter]);
-  const mainBounds = mode === "only" && filterBounds ? filterBounds : scopeBounds;
+  // 1 nguồn fit duy nhất (tránh ResizeObserver đè): ưu tiên phường focus (bấm từ list) > filter (mode chỉ lọc) > scope
+  const targetBounds = useMemo<[[number, number], [number, number]] | null>(() => {
+    if (focusWard && geo) {
+      const f = geo.features.find((x) => String(x.properties.wardCode ?? "") === focusWard);
+      if (f) return featureBounds(f);
+    }
+    if (mode === "only" && filterActive && filterBounds) return filterBounds;
+    return scopeBounds;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusWard, geo, mode, filterActive, filterBounds, scopeBounds, focusTick, wardFocusTick]);
 
   const wardInfo = useMemo(() => {
     if (!clickedWard) return null;
@@ -265,19 +282,6 @@ export function CoverageMap({
     const id = wmap?.[clickedWard]; const bc = id ? bcById[id] : undefined;
     return { code: clickedWard, ...meta, bcName: bc?.name ?? null, bcId: bc?.id ?? null };
   }, [clickedWard, wardMeta, wmap, bcById]);
-
-  // phường cũ/mới + diện tích cho BC đang chọn (từ map thật)
-  const bcWardStats = useMemo(() => {
-    if (!selId || !geo || !wmap) return null;
-    const countFor = (g: Geo | null, m: WardMap | null) => {
-      if (!g || !m) return { c: null as number | null, a: null as number | null };
-      let c = 0, ar = 0;
-      for (const f of g.features) if (m[String(f.properties.wardCode ?? "")] === selId) { c++; ar += featureAreaKm2(f); }
-      return { c, a: ar };
-    };
-    const act = countFor(geo, wmap), oth = countFor(otherGeo, otherMap);
-    return dvhc === "new" ? { newC: act.c, newA: act.a, oldC: oth.c, oldA: oth.a } : { oldC: act.c, oldA: act.a, newC: oth.c, newA: oth.a };
-  }, [selId, geo, wmap, otherGeo, otherMap, dvhc]);
 
   const shownWards = filterActive
     ? geo?.features.filter((f) => wardInFilter(String(f.properties.wardCode ?? ""))).length ?? 0
@@ -291,8 +295,7 @@ export function CoverageMap({
     <div className="rounded-md overflow-hidden border border-[var(--color-border)] relative" style={{ height, minHeight: 520 }}>
       <MapContainer key={srcKey} center={[16, 107]} zoom={6} scrollWheelZoom preferCanvas style={{ height: "100%", width: "100%" }}>
         <TileLayer attribution="&copy; OpenStreetMap" url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png" />
-        <FitBounds bounds={mainBounds} />
-        <FitWard bounds={filterBounds} tick={wardFocusTick} />
+        <FitBounds bounds={targetBounds} />
         {geo && (
           <GeoJSON key={srcKey} ref={geoRef} data={geo as unknown as GeoJSON.GeoJsonObject}
             style={styleFn as () => PathOptions} onEachFeature={onEachFeature as (f: unknown, l: Layer) => void} />
@@ -347,23 +350,24 @@ export function CoverageMap({
         </div>
       )}
 
-      {selectedBc && <BcProfilePanel bc={selectedBc} wardStats={bcWardStats} onClose={() => onToggleBc(selectedBc.id)} />}
+      {selectedBc && <BcProfilePanel bc={selectedBc} onClose={() => onToggleBc(selectedBc.id)} />}
     </div>
   );
 }
 
-function fmtArea(n: number | null | undefined) { return n == null ? "…" : n >= 100 ? `${Math.round(n)}` : `${Math.round(n * 10) / 10}`; }
-type WS = { newC: number | null; newA: number | null; oldC: number | null; oldA: number | null } | null;
+function fmtArea(n: number | null | undefined) { return n == null ? "0" : n >= 100 ? `${Math.round(n)}` : `${Math.round(n * 10) / 10}`; }
 
-function BcProfilePanel({ bc, wardStats, onClose }: { bc: BcInfo; wardStats: WS; onClose: () => void }) {
+function BcProfilePanel({ bc, onClose }: { bc: BcInfo; onClose: () => void }) {
   const Row = ({ label, children }: { label: string; children: React.ReactNode }) => (
     <div className="flex items-start justify-between gap-3 py-0.5">
       <span className="text-[var(--color-text-muted)] shrink-0">{label}</span>
       <span className="font-medium text-[var(--color-text)] text-right">{children}</span>
     </div>
   );
+  const PTS: PickType[] = ["DELIVERY", "PICK", "RETURN"];
+  const PT_VI: Record<PickType, string> = { DELIVERY: "Giao", PICK: "Lấy", RETURN: "Trả" };
   return (
-    <div className="absolute top-2 right-2 z-[1100] bg-white border border-[var(--color-border)] rounded-md p-3 text-xs shadow-lg w-64">
+    <div className="absolute top-2 right-2 z-[1100] bg-white border border-[var(--color-border)] rounded-md p-3 text-xs shadow-lg w-72 max-h-[calc(100%-1rem)] overflow-auto">
       <div className="flex items-start gap-2 mb-2">
         <div className="min-w-0">
           <div className="font-semibold text-[var(--color-text)]">{bc.name}</div>
@@ -377,15 +381,33 @@ function BcProfilePanel({ bc, wardStats, onClose }: { bc: BcInfo; wardStats: WS;
         <Row label="Phường trú">{bc.wardName}</Row>
         <Row label="Địa chỉ"><span className="text-[11px]">{bc.address}</span></Row>
         {bc.lat != null && <Row label="Toạ độ"><span className="font-mono text-[10px]">{bc.lat.toFixed(4)}, {bc.lng!.toFixed(4)}</span></Row>}
-        {wardStats && (
-          <>
-            <div className="my-1.5 border-t border-[var(--color-border)]" />
-            <div className="text-[10px] uppercase tracking-wide text-[var(--color-text-muted)]">Phạm vi phụ trách (theo hình thức)</div>
-            <Row label="Phường mới"><span className="text-[#2563eb]">{wardStats.newC ?? "…"}</span> · {fmtArea(wardStats.newA)} km²</Row>
-            <Row label="Phường cũ"><span className="text-[#ea580c]">{wardStats.oldC ?? "…"}</span> · {fmtArea(wardStats.oldA)} km²</Row>
-          </>
-        )}
       </div>
+      {bc.area && (
+        <div className="mt-2 pt-2 border-t border-[var(--color-border)]">
+          <div className="text-[10px] uppercase tracking-wide text-[var(--color-text-muted)] mb-1">Phạm vi & diện tích hoạt động</div>
+          <table className="w-full text-[11px]">
+            <thead>
+              <tr className="text-[var(--color-text-muted)]">
+                <th className="text-left font-normal pb-1">Hình thức</th>
+                <th className="text-right font-normal pb-1"><span className="text-[#2563eb]">Phường mới</span></th>
+                <th className="text-right font-normal pb-1"><span className="text-[#ea580c]">Phường cũ</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              {PTS.map((pt) => {
+                const a = bc.area![pt];
+                return (
+                  <tr key={pt} className="border-t border-[var(--color-border)]">
+                    <td className="py-1 text-[var(--color-text)]">{PT_VI[pt]}</td>
+                    <td className="py-1 text-right"><span className="font-medium">{a.nC}</span> phường<br /><span className="text-[10px] text-[var(--color-text-muted)]">{fmtArea(a.nA)} km²</span></td>
+                    <td className="py-1 text-right"><span className="font-medium">{a.oC}</span> phường<br /><span className="text-[10px] text-[var(--color-text-muted)]">{fmtArea(a.oA)} km²</span></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

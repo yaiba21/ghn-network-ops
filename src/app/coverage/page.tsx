@@ -55,6 +55,8 @@ export default function CoveragePage() {
   const [stats, setStats] = useState<Stats>(null);
   const [openList, setOpenList] = useState<null | "new" | "old">(null);
   const [bcsInScope, setBcsInScope] = useState<string[]>([]);
+  const [focusWard, setFocusWard] = useState<string | null>(null);
+  const [focusTick, setFocusTick] = useState(0);
 
   useEffect(() => {
     fetch("/coverage/manifest.json").then((r) => r.json()).then(setManifest).catch(() => {});
@@ -102,9 +104,17 @@ export default function CoveragePage() {
   }, [manifest, dvhc, regionCode]);
 
   const scopeKey = `${level}|${regionCode}|${provinceSlugs.join(",")}`;
-  useEffect(() => { setBcCodes([]); setWardCodes([]); setClickedWard(null); }, [scopeKey]);
-  useEffect(() => { setWardCodes([]); setClickedWard(null); }, [dvhc]);
+  useEffect(() => { setBcCodes([]); setWardCodes([]); setClickedWard(null); setFocusWard(null); }, [scopeKey]);
+  // đổi dvhc chỉ reset wardCodes (clickedWard/focusWard giữ để navigate sang bộ kia được)
+  useEffect(() => { setWardCodes([]); }, [dvhc]);
   useEffect(() => { setBcCodes([]); setClickedWard(null); }, [pickType]);
+
+  // bấm 1 phường trong danh sách "chưa có BC" → navigate tới polygon đó (đổi ĐVHC nếu cần)
+  const focusUncoveredWard = (code: string, system: "new" | "old") => {
+    setBcCodes([]); setWardCodes([]);
+    if (system !== dvhc) setDvhc(system);
+    setClickedWard(code); setFocusWard(code); setFocusTick((t) => t + 1);
+  };
 
   const activeSlugs = useMemo(() => {
     if (level === "province") return provinceSlugs;
@@ -183,7 +193,8 @@ export default function CoveragePage() {
         )}
       </div>
 
-      <StatsBar scopeLabel={`${scopeLabel} · ${pickType}`} bcCount={bcsInScope.length} stats={stats} openList={openList} onToggleList={(k) => setOpenList((c) => (c === k ? null : k))} />
+      <StatsBar scopeLabel={`${scopeLabel} · ${pickType}`} bcCount={stats?.bcCount ?? bcsInScope.length} stats={stats}
+        openList={openList} onToggleList={(k) => setOpenList((c) => (c === k ? null : k))} onFocusWard={focusUncoveredWard} />
 
       <CoverageMap
         srcs={srcs} otherSrcs={otherSrcs} mapSrcs={mapSrcs} otherMapSrcs={otherMapSrcs}
@@ -197,6 +208,8 @@ export default function CoveragePage() {
         onToggleBc={toggleBc}
         selectedBc={selectedBc}
         wardFocusTick={wardFocusTick}
+        focusWard={focusWard}
+        focusTick={focusTick}
         onWardsLoaded={setWardList}
         onStats={setStats}
         onBcsInScope={setBcsInScope}
@@ -207,12 +220,16 @@ export default function CoveragePage() {
   );
 }
 
-function StatsBar({ scopeLabel, bcCount, stats, openList, onToggleList }: {
-  scopeLabel: string; bcCount: number; stats: Stats; openList: null | "new" | "old"; onToggleList: (k: "new" | "old") => void;
+function StatsBar({ scopeLabel, bcCount, stats, openList, onToggleList, onFocusWard }: {
+  scopeLabel: string; bcCount: number; stats: Stats;
+  openList: null | "new" | "old"; onToggleList: (k: "new" | "old") => void;
+  onFocusWard: (code: string, system: "new" | "old") => void;
 }) {
   const nf = (n: number | undefined) => (n == null ? "…" : n.toLocaleString("vi-VN"));
   const cells: { label: string; value: string; warn?: boolean; listKey?: "new" | "old"; count?: number }[] = [
     { label: "Số lượng BC", value: nf(bcCount) },
+    { label: "BC chưa gán P.mới", value: nf(stats?.bcNoNew), warn: !!stats?.bcNoNew },
+    { label: "BC chưa gán P.cũ", value: nf(stats?.bcNoOld), warn: !!stats?.bcNoOld },
     { label: "Phường MỚI", value: nf(stats?.newWards) },
     { label: "Phường mới chưa có BC", value: nf(stats?.newUncovered), warn: !!stats?.newUncovered, listKey: "new", count: stats?.newUncovered ?? 0 },
     { label: "Phường CŨ", value: nf(stats?.oldWards) },
@@ -222,14 +239,14 @@ function StatsBar({ scopeLabel, bcCount, stats, openList, onToggleList }: {
   return (
     <div className="rounded-md border border-[var(--color-border)] bg-white overflow-hidden">
       <div className="px-3 py-1.5 text-[11px] uppercase tracking-wide text-[var(--color-text-muted)] border-b border-[var(--color-border)]">Thống kê — {scopeLabel}</div>
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 divide-x divide-y lg:divide-y-0 divide-[var(--color-border)]">
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 divide-x divide-y lg:divide-y-0 divide-[var(--color-border)]">
         {cells.map((c) => {
           const clickable = c.listKey && (c.count ?? 0) > 0;
           const active = openList === c.listKey && clickable;
           return (
             <button key={c.label} type="button" disabled={!clickable} onClick={() => clickable && onToggleList(c.listKey!)}
               className={cn("px-3 py-2 text-left", clickable ? "cursor-pointer hover:bg-[var(--color-hover)]" : "cursor-default", active && "bg-[var(--color-row-selected)]")}>
-              <div className="text-[11px] text-[var(--color-text-muted)]">{c.label}{clickable && <span className="ml-1">▾</span>}</div>
+              <div className="text-[11px] text-[var(--color-text-muted)] leading-tight">{c.label}{clickable && <span className="ml-1">▾</span>}</div>
               <div className={cn("text-lg font-semibold", c.warn ? "text-[var(--color-ghn-red)]" : "text-[var(--color-text)]")}>{c.value}</div>
             </button>
           );
@@ -237,12 +254,15 @@ function StatsBar({ scopeLabel, bcCount, stats, openList, onToggleList }: {
       </div>
       {openList && (
         <div className="border-t border-[var(--color-border)] bg-[var(--color-hover)]/40">
-          <div className="px-3 py-1.5 text-[11px] text-[var(--color-text-muted)]">Danh sách phường {openList === "new" ? "MỚI" : "CŨ"} chưa có BC phụ trách ({list.length})</div>
+          <div className="px-3 py-1.5 text-[11px] text-[var(--color-text-muted)]">Danh sách phường {openList === "new" ? "MỚI" : "CŨ"} chưa có BC phụ trách ({list.length}) — bấm để xem trên bản đồ</div>
           <div className="max-h-44 overflow-auto px-2 pb-2 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-3 gap-y-0.5">
             {list.length === 0 ? <div className="text-xs text-[var(--color-text-muted)] px-1">—</div> : (
               <>
                 {list.slice(0, 400).map((w, i) => (
-                  <div key={`${w.code}-${i}`} className="text-xs text-[var(--color-text)] truncate" title={`${w.name} · ${w.prov}`}>{w.name}<span className="text-[var(--color-text-faint)]"> · {w.prov}</span></div>
+                  <button key={`${w.code}-${i}`} type="button" onClick={() => onFocusWard(w.code, openList)}
+                    className="text-xs text-[var(--color-text)] truncate text-left hover:text-[var(--color-ghn-red)] hover:underline" title={`${w.name} · ${w.prov} — bấm để xem`}>
+                    {w.name}<span className="text-[var(--color-text-faint)]"> · {w.prov}</span>
+                  </button>
                 ))}
                 {list.length > 400 && <div className="text-xs text-[var(--color-text-muted)] px-1">… +{(list.length - 400).toLocaleString("vi-VN")} phường nữa</div>}
               </>
