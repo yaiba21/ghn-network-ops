@@ -4125,6 +4125,49 @@ export function getCoverageBcs(
   return provinces.flatMap(toMarker);
 }
 
+// --- BC list nhẹ cho trang Phạm vi BC (chỉ identity; vị trí marker tính ở map theo tâm cụm phường) ---
+export type CoverageBcLite = {
+  code: string;
+  name: string;
+  provinceCode: string;
+  provinceName: string;
+  regionCode: RegionCode;
+};
+
+/**
+ * Danh sách BC theo scope để chọn / vẽ marker trên trang Phạm vi BC.
+ * - "all"      → toàn bộ ~1.200 BC (cả nước)
+ * - "region"   → BC thuộc 1 vùng (RegionCode)
+ * - "province" → BC thuộc 1 tỉnh (app province code)
+ * Chỉ trả identity (rất nhẹ) — profile/tình trạng tính riêng qua getBcProfile khi cần.
+ */
+export function getCoverageBcList(
+  level: "all" | "region" | "province",
+  value: string,
+): CoverageBcLite[] {
+  const provMap = new Map(getProvinces().map((p) => [p.code, p.name]));
+  let list = getBcs();
+  if (level === "region") list = list.filter((b) => b.regionCode === value);
+  else if (level === "province") list = list.filter((b) => b.provinceCode === value);
+  return list.map((b) => ({
+    code: b.code,
+    name: b.name,
+    provinceCode: b.provinceCode,
+    provinceName: provMap.get(b.provinceCode) ?? "",
+    regionCode: b.regionCode,
+  }));
+}
+
+/**
+ * Profile + tình trạng đầy đủ cho 1 BC (tính khi user chọn / click marker).
+ * Tìm tỉnh của BC rồi lấy từ getTerritoryMap (chỉ 1 tỉnh → nhẹ).
+ */
+export function getBcProfile(filter: FilterState, bcCode: string): TerritoryBc | null {
+  const bc = getBcs().find((b) => b.code === bcCode);
+  if (!bc) return null;
+  return getTerritoryMap(filter, bc.provinceCode).bcs.find((t) => t.bcCode === bcCode) ?? null;
+}
+
 
 // =============================================================================
 // PHASE 10 — Network OD matrix (lane KTC×KTC)
