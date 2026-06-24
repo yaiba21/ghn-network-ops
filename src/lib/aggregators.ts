@@ -4125,21 +4125,33 @@ export function getCoverageBcs(
   return provinces.flatMap(toMarker);
 }
 
-// --- BC list nhẹ cho trang Phạm vi BC (chỉ identity; vị trí marker tính ở map theo tâm cụm phường) ---
+// --- BC list nhẹ cho trang Phạm vi BC (identity + vị trí địa lý gần đúng để gán phường đúng BC) ---
 export type CoverageBcLite = {
   code: string;
   name: string;
   provinceCode: string;
   provinceName: string;
   regionCode: RegionCode;
+  lat: number;
+  lng: number;
 };
+
+// jitter ổn định theo mã BC (để các BC cùng tỉnh không trùng vị trí), ±~0.18°
+function bcJitter(code: string): { dlat: number; dlng: number } {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < code.length; i++) { h ^= code.charCodeAt(i); h = Math.imul(h, 16777619); }
+  const r1 = ((h >>> 0) % 1000) / 1000;
+  h ^= h >>> 13; h = Math.imul(h, 0x5bd1e995); h ^= h >>> 15;
+  const r2 = ((h >>> 0) % 1000) / 1000;
+  return { dlat: (r1 - 0.5) * 0.36, dlng: (r2 - 0.5) * 0.42 };
+}
 
 /**
  * Danh sách BC theo scope để chọn / vẽ marker trên trang Phạm vi BC.
  * - "all"      → toàn bộ ~1.200 BC (cả nước)
  * - "region"   → BC thuộc 1 vùng (RegionCode)
  * - "province" → BC thuộc 1 tỉnh (app province code)
- * Chỉ trả identity (rất nhẹ) — profile/tình trạng tính riêng qua getBcProfile khi cần.
+ * Kèm lat/lng (centroid tỉnh + jitter) để map gán phường → BC GẦN NHẤT về địa lý (tên đúng vùng).
  */
 export function getCoverageBcList(
   level: "all" | "region" | "province",
@@ -4149,13 +4161,19 @@ export function getCoverageBcList(
   let list = getBcs();
   if (level === "region") list = list.filter((b) => b.regionCode === value);
   else if (level === "province") list = list.filter((b) => b.provinceCode === value);
-  return list.map((b) => ({
-    code: b.code,
-    name: b.name,
-    provinceCode: b.provinceCode,
-    provinceName: provMap.get(b.provinceCode) ?? "",
-    regionCode: b.regionCode,
-  }));
+  return list.map((b) => {
+    const geo = PROVINCE_GEO[b.provinceCode] ?? { lat: 16, lng: 107 };
+    const j = bcJitter(b.code);
+    return {
+      code: b.code,
+      name: b.name,
+      provinceCode: b.provinceCode,
+      provinceName: provMap.get(b.provinceCode) ?? "",
+      regionCode: b.regionCode,
+      lat: geo.lat + j.dlat,
+      lng: geo.lng + j.dlng,
+    };
+  });
 }
 
 /**

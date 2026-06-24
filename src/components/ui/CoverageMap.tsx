@@ -81,40 +81,32 @@ function featureBounds(f: Feat): [[number, number], [number, number]] {
       }
   return [[a, c], [b, d]];
 }
-function farthest(pts: [number, number][], K: number): number[] {
-  const n = pts.length;
-  if (K >= n) return pts.map((_, i) => i);
-  const chosen = [0];
-  const dist = pts.map((p) => d2(p, pts[0]));
-  while (chosen.length < K) {
-    let bi = 0, bd = -1;
-    for (let i = 0; i < n; i++) if (dist[i] > bd) { bd = dist[i]; bi = i; }
-    chosen.push(bi);
-    const c = pts[bi];
-    for (let i = 0; i < n; i++) { const dd = d2(pts[i], c); if (dd < dist[i]) dist[i] = dd; }
-  }
-  return chosen;
-}
+// Gán mỗi phường cho BC GẦN NHẤT theo vị trí địa lý của BC (→ tên BC đúng vùng, không lộn xộn).
 function assign(feats: Feat[], bcs: CoverageBcLite[]): Assign {
   const n = feats.length;
-  const K = Math.min(bcs.length, n);
+  const K = bcs.length;
   const cnt = new Array(K).fill(0), area = new Array(K).fill(0);
   const sumLat = new Array(K).fill(0), sumLng = new Array(K).fill(0);
   const wardBc = new Map<string, number>();
   if (K === 0) return { wardBc, cnt, area, sumLat, sumLng, wardCount: n, uncovered: n };
   const cent = feats.map(centroidOf);
   const wba = new Array(n).fill(0);
-  const anchors = farthest(cent, K);
-  const ax = anchors.map((i) => cent[i]);
   for (let i = 0; i < n; i++) {
     const p = cent[i];
-    let ba = 0, bd = Infinity;
-    for (let a = 0; a < K; a++) { const dd = d2(p, ax[a]); if (dd < bd) { bd = dd; ba = a; } }
-    wba[i] = ba;
-    wardBc.set(String(feats[i].properties.wardCode ?? i), ba);
-    cnt[ba] += 1; area[ba] += featureAreaKm2(feats[i]);
-    sumLat[ba] += p[0]; sumLng[ba] += p[1];
+    const cosLat = Math.cos((p[0] * Math.PI) / 180);
+    let bj = 0, bd = Infinity;
+    for (let a = 0; a < K; a++) {
+      const dlat = p[0] - bcs[a].lat;
+      const dlng = (p[1] - bcs[a].lng) * cosLat;
+      const dd = dlat * dlat + dlng * dlng;
+      if (dd < bd) { bd = dd; bj = a; }
+    }
+    wba[i] = bj;
+    wardBc.set(String(feats[i].properties.wardCode ?? i), bj);
+    cnt[bj] += 1; area[bj] += featureAreaKm2(feats[i]);
+    sumLat[bj] += p[0]; sumLng[bj] += p[1];
   }
+  // marker = tâm cụm phường; phường xa tâm cụm > bán kính phục vụ = chưa có BC
   const cLat = sumLat.map((s, a) => (cnt[a] ? s / cnt[a] : 0));
   const cLng = sumLng.map((s, a) => (cnt[a] ? s / cnt[a] : 0));
   const rDeg = COVERAGE_R_KM / 111.32;
