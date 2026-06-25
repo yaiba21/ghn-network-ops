@@ -18,10 +18,12 @@ export type CoverageMode = "all" | "only";
 export type PickType = "DELIVERY" | "PICK" | "RETURN";
 
 type AreaCell = { nC: number; nA: number; oC: number; oA: number };
+export type SetMode = "all" | "default" | "special";
 export type BcInfo = {
   id: string; name: string; type: string; region: string; province: string;
-  wardCode: string; wardName: string; address: string; lat: number | null; lng: number | null;
+  wardCode?: string; wardName: string; address?: string; lat: number | null; lng: number | null;
   area?: Record<PickType, AreaCell>;
+  sets?: string[]; // bộ chỉ định (khác GHNExpress); rỗng = chỉ bộ mặc định
 };
 export type BcLite = { id: string; name: string; prov: string };
 export type CoverageStats = {
@@ -127,7 +129,7 @@ function FitBounds({ bounds }: { bounds: [[number, number], [number, number]] | 
 export function CoverageMap({
   srcs, otherSrcs, mapSrcs, otherMapSrcs, bcById, dvhc, mode,
   bcCodes, wardCodes, clickedWard, onClickWard, onToggleBc,
-  selectedBc, wardFocusTick, focusWard, focusBc, focusTick, onWardsLoaded, onStats, onBcsInScope,
+  selectedBc, wardFocusTick, focusWard, focusBc, focusTick, setMode, onWardsLoaded, onStats, onBcsInScope,
   scopeLabel, height = 640,
 }: {
   srcs: string[]; otherSrcs: string[]; mapSrcs: string[]; otherMapSrcs: string[];
@@ -141,6 +143,7 @@ export function CoverageMap({
   focusWard: string | null;
   focusBc: string | null;
   focusTick: number;
+  setMode: SetMode;
   onWardsLoaded: (wards: { code: string; name: string; prov: string }[]) => void;
   onStats: (s: CoverageStats) => void;
   onBcsInScope: (ids: string[]) => void;
@@ -201,10 +204,10 @@ export function CoverageMap({
     return { union, bcsNew, bcsOld };
   }, [geo, wmap, otherGeo, otherMap, dvhc]);
 
-  // marker = TẤT CẢ BC trong scope (kể cả BC chưa gán bộ đang xem), tại vị trí thật, màu theo loại hình
-  const markers = useMemo(() => {
-    const out: { id: string; name: string; lat: number; lng: number; kind: BcKind }[] = [];
-    bcSets.union.forEach((id) => { const b = bcById[id]; if (b && b.lat != null && b.lng != null) out.push({ id, name: b.name, lat: b.lat, lng: b.lng, kind: bcKindOf(b, dvhc) }); });
+  // marker bộ MẶC ĐỊNH = BC phục vụ phường (theo ward map), tại vị trí thật, màu theo loại hình
+  const defaultMarkers = useMemo(() => {
+    const out: { id: string; name: string; lat: number; lng: number; kind: BcKind; special: boolean }[] = [];
+    bcSets.union.forEach((id) => { const b = bcById[id]; if (b && b.lat != null && b.lng != null) out.push({ id, name: b.name, lat: b.lat, lng: b.lng, kind: bcKindOf(b, dvhc), special: !!b.sets?.length }); });
     return out;
   }, [bcSets, bcById, dvhc]);
 
@@ -257,6 +260,7 @@ export function CoverageMap({
     const dim: PathOptions = mode === "only"
       ? { opacity: 0, fillOpacity: 0, weight: 0 }
       : { color: col.line, weight: 0.3, fillColor: col.fill, fillOpacity: 0.1 };
+    if (setMode === "special") return { opacity: 0, fillOpacity: 0, weight: 0 }; // bộ chỉ định không có polygon phường
     if (kindActive && !kindFilter.includes(kind)) return dim;        // lọc theo loại hình BC
     if (code === clickedWard) return { color: CLICK.line, weight: 2.5, fillColor: CLICK.fill, fillOpacity: 0.6 };
     if (filterActive) {
@@ -264,7 +268,7 @@ export function CoverageMap({
       return dim;
     }
     return { color: col.line, weight: 0.4, fillColor: col.fill, fillOpacity: kind === "NONE" ? 0.4 : 0.5 };
-  }, [wmap, bcById, dvhc, filterActive, clickedWard, wardInFilter, mode, kindActive, kindFilter]);
+  }, [wmap, bcById, dvhc, filterActive, clickedWard, wardInFilter, mode, kindActive, kindFilter, setMode]);
 
   useEffect(() => { geoRef.current?.setStyle(styleFn as (f: unknown) => PathOptions); }, [styleFn, geo]);
 
@@ -283,6 +287,28 @@ export function CoverageMap({
       if (lat < a) a = lat; if (lat > b) b = lat; if (lng < c) c = lng; if (lng > d) d = lng; }
     return has ? [[a, c], [b, d]] : null;
   }, [geo]);
+
+  // marker bộ CHỈ ĐỊNH = BC có sets, nằm trong khung nhìn (bbox scope) — bộ đặc biệt không có polygon phường
+  const specialMarkers = useMemo(() => {
+    if (!scopeBounds) return [] as { id: string; name: string; lat: number; lng: number; kind: BcKind; special: boolean }[];
+    const [[a, c], [b, d]] = scopeBounds;
+    const out: { id: string; name: string; lat: number; lng: number; kind: BcKind; special: boolean }[] = [];
+    for (const id in bcById) {
+      const bc = bcById[id];
+      if (!bc.sets?.length || bc.lat == null || bc.lng == null) continue;
+      if (bc.lat >= a && bc.lat <= b && bc.lng >= c && bc.lng <= d) out.push({ id, name: bc.name, lat: bc.lat, lng: bc.lng, kind: bcKindOf(bc, dvhc), special: true });
+    }
+    return out;
+  }, [bcById, scopeBounds, dvhc]);
+
+  // marker hiển thị theo Bộ vận hành: mặc định / chỉ định / tất cả
+  const markers = useMemo(() => {
+    if (setMode === "special") return specialMarkers;
+    if (setMode === "default") return defaultMarkers;
+    const ids = new Set(defaultMarkers.map((m) => m.id));
+    return [...defaultMarkers, ...specialMarkers.filter((m) => !ids.has(m.id))];
+  }, [defaultMarkers, specialMarkers, setMode]);
+
   // bounds chỉ dựa trên LỰA CHỌN TỪ DROPDOWN (bcCodes/wardCodes) — KHÔNG tính clickedWard
   // → bấm polygon trên map không làm đổi zoom (fix lỗi zoom out khi click)
   const dropdownActive = bcCodes.length > 0 || wardCodes.length > 0;
@@ -329,7 +355,7 @@ export function CoverageMap({
   }, [clickedWard, wardMeta, wmap, bcById]);
 
   const shownWards = useMemo(() => {
-    if (!geo) return 0;
+    if (!geo || setMode === "special") return 0; // bộ chỉ định không vẽ polygon phường
     return geo.features.filter((f) => {
       const code = String(f.properties.wardCode ?? "");
       const id = wmap?.[code];
@@ -338,7 +364,7 @@ export function CoverageMap({
       if (filterActive && !wardInFilter(code)) return false;
       return true;
     }).length;
-  }, [geo, wmap, bcById, dvhc, kindActive, kindFilter, filterActive, wardInFilter]);
+  }, [geo, wmap, bcById, dvhc, kindActive, kindFilter, filterActive, wardInFilter, setMode]);
   const shownBc = useMemo(
     () => (kindActive ? markers.filter((m) => kindFilter.includes(m.kind)).length : markers.length),
     [markers, kindActive, kindFilter],
@@ -367,14 +393,16 @@ export function CoverageMap({
             style={styleFn as () => PathOptions} onEachFeature={onEachFeature as (f: unknown, l: Layer) => void} />
         )}
         {markers.map((m, mi) => {
-          if (kindActive && !kindFilter.includes(m.kind)) return null;
+          if (setMode !== "special" && kindActive && !kindFilter.includes(m.kind)) return null;
           const isHl = hlBc.has(m.id);
           if (mode === "only" && filterActive && !isHl) return null;
+          // BC chỉ định: viền vàng cam nổi bật + to hơn
+          const ring = m.special ? "#b45309" : "#fff";
           return (
-            <CircleMarker key={`${m.id}-${mi}`} center={[m.lat, m.lng]} radius={isHl ? 7 : 4}
-              pathOptions={{ color: "#fff", fillColor: isHl ? BC_SEL : KIND_COLOR[m.kind].line, fillOpacity: 1, weight: isHl ? 2 : 1.2 }}
+            <CircleMarker key={`${m.id}-${mi}`} center={[m.lat, m.lng]} radius={isHl ? 7 : m.special ? 5.5 : 4}
+              pathOptions={{ color: isHl ? BC_SEL : ring, fillColor: m.special ? "#f59e0b" : KIND_COLOR[m.kind].line, fillOpacity: 1, weight: m.special ? 2.5 : isHl ? 2 : 1.2 }}
               eventHandlers={{ click: () => onToggleBc(m.id) }}>
-              <LTooltip>{m.name} — {KIND_LABEL[m.kind]} — bấm để lọc</LTooltip>
+              <LTooltip>{m.name}{m.special ? " — BC CHỈ ĐỊNH" : ` — ${KIND_LABEL[m.kind]}`} — bấm để lọc</LTooltip>
             </CircleMarker>
           );
         })}
@@ -406,6 +434,10 @@ export function CoverageMap({
               </button>
             );
           })}
+        </div>
+        <div className="flex items-center gap-1 pt-0.5 border-t border-[var(--color-border)]">
+          <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: "#f59e0b", border: "1.5px solid #b45309" }} />
+          BC chỉ định ({specialMarkers.length} trong khung) — chấm viền cam
         </div>
       </div>
 
@@ -466,8 +498,21 @@ function BcProfilePanel({ bc, onClose }: { bc: BcInfo; onClose: () => void }) {
         <Row label="Vùng">{bc.region}</Row>
         <Row label="Tỉnh">{bc.province}</Row>
         <Row label="Phường trú">{bc.wardName}</Row>
-        <Row label="Địa chỉ"><span className="text-[11px]">{bc.address}</span></Row>
+        {bc.address ? <Row label="Địa chỉ"><span className="text-[11px]">{bc.address}</span></Row> : null}
         {bc.lat != null && <Row label="Toạ độ"><span className="font-mono text-[10px]">{bc.lat.toFixed(4)}, {bc.lng!.toFixed(4)}</span></Row>}
+      </div>
+      <div className="mt-2 pt-2 border-t border-[var(--color-border)]">
+        <div className="text-[10px] uppercase tracking-wide text-[var(--color-text-muted)] mb-1">Bộ vận hành</div>
+        {bc.sets?.length ? (
+          <div className="flex flex-wrap gap-1">
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--color-hover)] border border-[var(--color-border)] text-[var(--color-text-muted)]">Mặc định (GHNExpress)</span>
+            {bc.sets.map((s) => (
+              <span key={s} className="text-[10px] px-1.5 py-0.5 rounded text-white" style={{ background: "#b45309" }}>{s}</span>
+            ))}
+          </div>
+        ) : (
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--color-hover)] border border-[var(--color-border)] text-[var(--color-text-muted)]">Mặc định (GHNExpress)</span>
+        )}
       </div>
       {bc.area && (
         <div className="mt-2 pt-2 border-t border-[var(--color-border)]">

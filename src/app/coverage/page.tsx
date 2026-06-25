@@ -7,7 +7,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { DimensionSelect } from "@/components/filter/DimensionSelect";
 import { MultiSelect } from "@/components/ui/MultiSelect";
 import { cn } from "@/lib/utils";
-import type { CoverageMode, CoverageStats, PickType, BcInfo } from "@/components/ui/CoverageMap";
+import type { CoverageMode, CoverageStats, PickType, BcInfo, SetMode } from "@/components/ui/CoverageMap";
 
 const CoverageMap = dynamic(
   () => import("@/components/ui/CoverageMap").then((m) => m.CoverageMap),
@@ -46,6 +46,7 @@ export default function CoveragePage() {
   const [regionCode, setRegionCode] = useState<RegionSel>("HCM");
   const [provinceSlugs, setProvinceSlugs] = useState<string[]>(["ho-chi-minh"]);
   const [mode, setMode] = useState<CoverageMode>("all");
+  const [pdrSetMode, setPdrSetMode] = useState<SetMode>("all");
   const [pickType, setPickType] = useState<PickType>("DELIVERY");
   const [bcCodes, setBcCodes] = useState<string[]>([]);
   const [wardCodes, setWardCodes] = useState<string[]>([]);
@@ -184,6 +185,7 @@ export default function CoveragePage() {
         <Toggle label="Đơn vị hành chính" value={dvhc} options={[{ v: "new", l: "ĐVHC mới" }, { v: "old", l: "ĐVHC cũ" }]} onChange={(v) => setDvhc(v as Dvhc)} />
         <Toggle label="Cấp xem" value={level} options={[{ v: "region", l: "Vùng / Cả nước" }, { v: "province", l: "Theo tỉnh" }]} onChange={(v) => setLevel(v as Level)} />
         <Toggle label="Chế độ" value={mode} options={[{ v: "all", l: "Hiện tất cả" }, { v: "only", l: "Chỉ phần lọc" }]} onChange={(v) => setMode(v as CoverageMode)} />
+        <Toggle label="Bộ vận hành" value={pdrSetMode} options={[{ v: "all", l: "Tất cả" }, { v: "default", l: "Mặc định" }, { v: "special", l: "Chỉ định" }]} onChange={(v) => setPdrSetMode(v as SetMode)} />
 
         {level === "region" ? (
           <DimensionSelect label="Vùng" value={regionCode} options={regionOpts} onChange={(v) => v && setRegionCode(v as RegionSel)} allOptionLabel="Chọn vùng" width={200} searchable />
@@ -220,6 +222,7 @@ export default function CoveragePage() {
         focusWard={focusWard}
         focusBc={focusBc}
         focusTick={focusTick}
+        setMode={pdrSetMode}
         onWardsLoaded={setWardList}
         onStats={setStats}
         onBcsInScope={setBcsInScope}
