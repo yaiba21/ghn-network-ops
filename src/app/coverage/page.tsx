@@ -1,13 +1,29 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import { REGION_LABEL_VI, type RegionCode } from "@/lib/types";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { DimensionSelect } from "@/components/filter/DimensionSelect";
 import { MultiSelect } from "@/components/ui/MultiSelect";
 import { cn } from "@/lib/utils";
-import type { CoverageMode, CoverageStats, PickType, BcInfo, SetMode } from "@/components/ui/CoverageMap";
+import type { CoverageMode, CoverageStats, PickType, BcInfo } from "@/components/ui/CoverageMap";
+
+type SetItem = { set: string; slug: string; nhom: string; khachHang: string | null; bcCount: number; combos?: Record<string, number> };
+
+// combo (pickType_system) có nhiều phường nhất cho bộ/nhóm đang chọn → để tự chuyển Hình thức + ĐVHC khi chọn bộ
+function bestComboFor(pdrSet: string, setList: SetItem[]): { pt: PickType; sys: "new" | "old" } | null {
+  if (pdrSet === "GHNEXPRESS") return null;
+  const acc: Record<string, number> = {};
+  const src = pdrSet.startsWith("group:")
+    ? setList.filter((s) => s.nhom === pdrSet.slice(6))
+    : setList.filter((s) => s.slug === pdrSet);
+  for (const s of src) for (const [k, v] of Object.entries(s.combos ?? {})) acc[k] = (acc[k] ?? 0) + v;
+  const top = Object.entries(acc).sort((a, b) => b[1] - a[1])[0];
+  if (!top) return null;
+  const [pt, sys] = top[0].split("_");
+  return { pt: pt as PickType, sys: sys as "new" | "old" };
+}
 
 const CoverageMap = dynamic(
   () => import("@/components/ui/CoverageMap").then((m) => m.CoverageMap),
@@ -46,7 +62,9 @@ export default function CoveragePage() {
   const [regionCode, setRegionCode] = useState<RegionSel>("HCM");
   const [provinceSlugs, setProvinceSlugs] = useState<string[]>(["ho-chi-minh"]);
   const [mode, setMode] = useState<CoverageMode>("all");
-  const [pdrSetMode, setPdrSetMode] = useState<SetMode>("all");
+  const [setList, setSetList] = useState<SetItem[]>([]);
+  const [bcStats, setBcStats] = useState<{ ghnBcCount: number; coverage: Record<string, number> } | null>(null);
+  const [pdrSet, setPdrSet] = useState<string>("GHNEXPRESS"); // bộ dịch vụ đang xem
   const [pickType, setPickType] = useState<PickType>("DELIVERY");
   const [bcCodes, setBcCodes] = useState<string[]>([]);
   const [wardCodes, setWardCodes] = useState<string[]>([]);
@@ -63,6 +81,8 @@ export default function CoveragePage() {
   useEffect(() => {
     fetch("/coverage/manifest.json").then((r) => r.json()).then(setManifest).catch(() => {});
     fetch("/coverage/bc.json").then((r) => r.json()).then(setBcArr).catch(() => {});
+    fetch("/coverage/sets.json").then((r) => r.json()).then(setSetList).catch(() => {});
+    fetch("/coverage/bcstats.json").then((r) => r.json()).then(setBcStats).catch(() => {});
   }, []);
 
   const bcById = useMemo(() => {
@@ -110,6 +130,16 @@ export default function CoveragePage() {
   // đổi dvhc chỉ reset wardCodes (clickedWard/focus giữ để navigate sang bộ kia được)
   useEffect(() => { setWardCodes([]); }, [dvhc]);
   useEffect(() => { setBcCodes([]); setClickedWard(null); setFocusWard(null); setFocusBc(null); }, [pickType]);
+  // đổi Bộ dịch vụ → bỏ filter; bộ chỉ định: về Cả nước + tự chỉnh Hình thức/ĐVHC sang combo bộ CÓ data (vd GXT_TRA → Trả + ĐVHC cũ)
+  useEffect(() => {
+    setBcCodes([]); setWardCodes([]); setClickedWard(null); setFocusWard(null); setFocusBc(null);
+    if (pdrSet !== "GHNEXPRESS") {
+      setLevel("region"); setRegionCode("ALL");
+      const bc = bestComboFor(pdrSet, setList);
+      if (bc) { setPickType(bc.pt); setDvhc(bc.sys); }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pdrSet]);
 
   // bấm 1 phường trong danh sách "chưa có BC" → navigate tới polygon đó (đổi ĐVHC nếu cần)
   const focusUncoveredWard = (code: string, system: "new" | "old") => {
@@ -148,8 +178,40 @@ export default function CoveragePage() {
     return [...others].map((s) => `/coverage/${od}/province/${s}.geojson`);
   }, [dvhc, level, regionCode, activeSlugs, newToOldSlugs, oldToNewSlug]);
 
-  const mapSrcs = useMemo(() => [`/coverage/bcmap/${pickType}_${dvhc}.json`], [pickType, dvhc]);
-  const otherMapSrcs = useMemo(() => [`/coverage/bcmap/${pickType}_${dvhc === "new" ? "old" : "new"}.json`], [pickType, dvhc]);
+  // ward→BC theo BỘ DỊCH VỤ đang chọn: GHNEXPRESS = mặc định; group:{nhóm} = gộp các bộ trong nhóm; còn lại = 1 bộ (slug)
+  const setMapFiles = useCallback((sys: Dvhc) => {
+    if (pdrSet === "GHNEXPRESS") return [`/coverage/bcmap/${pickType}_${sys}.json`];
+    if (pdrSet.startsWith("group:")) {
+      const nhom = pdrSet.slice(6);
+      return setList.filter((s) => s.nhom === nhom).map((s) => `/coverage/bcmap/sets/${s.slug}__${pickType}_${sys}.json`);
+    }
+    return [`/coverage/bcmap/sets/${pdrSet}__${pickType}_${sys}.json`];
+  }, [pdrSet, pickType, setList]);
+  const mapSrcs = useMemo(() => setMapFiles(dvhc), [setMapFiles, dvhc]);
+  const otherMapSrcs = useMemo(() => setMapFiles(dvhc === "new" ? "old" : "new"), [setMapFiles, dvhc]);
+
+  // dropdown Bộ dịch vụ: option "(all)" của DimensionSelect = Mạng chuẩn (GHNExpress); còn lại mỗi nhóm: "tất cả" + từng bộ
+  const setOpts = useMemo(() => {
+    const opts: { value: string; label: string }[] = [];
+    const byNhom = new Map<string, SetItem[]>();
+    for (const s of setList) (byNhom.get(s.nhom) ?? byNhom.set(s.nhom, []).get(s.nhom)!).push(s);
+    for (const [nhom, arr] of [...byNhom].sort((a, b) => a[0].localeCompare(b[0], "vi"))) {
+      opts.push({ value: `group:${nhom}`, label: `▸ ${nhom} — tất cả (${arr.length} bộ)` });
+      for (const s of [...arr].sort((a, b) => a.set.localeCompare(b.set)))
+        opts.push({ value: s.slug, label: `   ${s.set}${s.khachHang ? ` · ${s.khachHang}` : ""} (${s.bcCount} BC)` });
+    }
+    return opts;
+  }, [setList]);
+  const pdrSetLabel = useMemo(
+    () => (pdrSet === "GHNEXPRESS" ? "Mạng chuẩn (GHNExpress)" : setOpts.find((o) => o.value === pdrSet)?.label.trim() ?? pdrSet),
+    [setOpts, pdrSet],
+  );
+  // set name → {nhóm, khách hàng} cho profile BC
+  const setMeta = useMemo(() => {
+    const m: Record<string, { nhom: string; khachHang: string | null }> = {};
+    for (const s of setList) m[s.set] = { nhom: s.nhom, khachHang: s.khachHang };
+    return m;
+  }, [setList]);
 
   const scopeLabel =
     level === "region"
@@ -185,7 +247,7 @@ export default function CoveragePage() {
         <Toggle label="Đơn vị hành chính" value={dvhc} options={[{ v: "new", l: "ĐVHC mới" }, { v: "old", l: "ĐVHC cũ" }]} onChange={(v) => setDvhc(v as Dvhc)} />
         <Toggle label="Cấp xem" value={level} options={[{ v: "region", l: "Vùng / Cả nước" }, { v: "province", l: "Theo tỉnh" }]} onChange={(v) => setLevel(v as Level)} />
         <Toggle label="Chế độ" value={mode} options={[{ v: "all", l: "Hiện tất cả" }, { v: "only", l: "Chỉ phần lọc" }]} onChange={(v) => setMode(v as CoverageMode)} />
-        <Toggle label="Bộ vận hành" value={pdrSetMode} options={[{ v: "all", l: "Tất cả" }, { v: "default", l: "Mặc định" }, { v: "special", l: "Chỉ định" }]} onChange={(v) => setPdrSetMode(v as SetMode)} />
+        <DimensionSelect label="Bộ dịch vụ (hub_prd_set)" value={pdrSet === "GHNEXPRESS" ? undefined : pdrSet} options={setOpts} onChange={(v) => setPdrSet(v ?? "GHNEXPRESS")} allOptionLabel="● Mạng chuẩn (GHNExpress)" width={260} searchable />
 
         {level === "region" ? (
           <DimensionSelect label="Vùng" value={regionCode} options={regionOpts} onChange={(v) => v && setRegionCode(v as RegionSel)} allOptionLabel="Chọn vùng" width={200} searchable />
@@ -203,13 +265,13 @@ export default function CoveragePage() {
         )}
       </div>
 
-      <StatsBar scopeLabel={`${scopeLabel} · ${pickType}`} bcCount={stats?.bcCount ?? bcsInScope.length} stats={stats}
+      <StatsBar scopeLabel={`${scopeLabel} · ${pickType} · ${pdrSetLabel}`} bcCount={stats?.bcCount ?? bcsInScope.length} stats={stats}
         openList={openList} onToggleList={(k) => setOpenList((c) => (c === k ? null : k))}
         onFocusWard={focusUncoveredWard} onFocusBc={focusBcNav} />
 
       <CoverageMap
         srcs={srcs} otherSrcs={otherSrcs} mapSrcs={mapSrcs} otherMapSrcs={otherMapSrcs}
-        bcById={bcById} dvhc={dvhc} mode={mode}
+        bcById={bcById} dvhc={dvhc} mode={mode} setMeta={setMeta} coverageStats={bcStats}
         bcCodes={bcCodes} wardCodes={wardCodes} clickedWard={clickedWard}
         onClickWard={(code, additive) => {
           if (!code) { setClickedWard(null); return; }
@@ -222,7 +284,6 @@ export default function CoveragePage() {
         focusWard={focusWard}
         focusBc={focusBc}
         focusTick={focusTick}
-        setMode={pdrSetMode}
         onWardsLoaded={setWardList}
         onStats={setStats}
         onBcsInScope={setBcsInScope}

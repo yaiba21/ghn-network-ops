@@ -18,12 +18,12 @@ export type CoverageMode = "all" | "only";
 export type PickType = "DELIVERY" | "PICK" | "RETURN";
 
 type AreaCell = { nC: number; nA: number; oC: number; oA: number };
-export type SetMode = "all" | "default" | "special";
 export type BcInfo = {
   id: string; name: string; type: string; region: string; province: string;
   wardCode?: string; wardName: string; address?: string; lat: number | null; lng: number | null;
   area?: Record<PickType, AreaCell>;
-  sets?: string[]; // bộ chỉ định (khác GHNExpress); rỗng = chỉ bộ mặc định
+  sets?: string[]; // bộ chỉ định (khác GHNExpress) BC này phục vụ; rỗng = chỉ bộ mặc định
+  customers?: string[]; // khách hàng cụ thể của các bộ chỉ định
 };
 export type BcLite = { id: string; name: string; prov: string };
 export type CoverageStats = {
@@ -34,17 +34,23 @@ export type CoverageStats = {
 } | null;
 
 // Loại hình vận hành BC (suy từ DELIVERY/PICK/RETURN theo phường mới/cũ)
-export type BcKind = "D" | "P" | "R" | "MIX" | "NONE";
+export type BcKind = "D" | "P" | "R" | "MIX" | "COV" | "NONE";
 const KIND_COLOR: Record<BcKind, { fill: string; line: string }> = {
   D: { fill: "#2563eb", line: "#1d4ed8" },     // Chuyên Giao
   P: { fill: "#16a34a", line: "#15803d" },     // Chuyên Lấy
   R: { fill: "#f59e0b", line: "#d97706" },     // Chuyên Trả
   MIX: { fill: "#7c3aed", line: "#6d28d9" },   // Hỗn hợp (Giao + Lấy)
+  COV: { fill: "#0ea5e9", line: "#0284c7" },   // được bộ phủ (BC không có loại GHNExpress — bộ chỉ định)
   NONE: { fill: "#9ca3af", line: "#6b7280" },  // chưa có BC phụ trách
 };
 export const KIND_LABEL: Record<BcKind, string> = {
-  D: "Chuyên Giao", P: "Chuyên Lấy", R: "Chuyên Trả", MIX: "Hỗn hợp", NONE: "Chưa có BC",
+  D: "Chuyên Giao", P: "Chuyên Lấy", R: "Chuyên Trả", MIX: "Hỗn hợp", COV: "Được phủ", NONE: "Chưa có BC",
 };
+// tỉ lệ BC mạng chuẩn (GHNEXPRESS) đã có coverage phường — panel nhỏ góc map
+const COV_ROWS: { label: string; key: string }[] = [
+  { label: "Cũ · Giao", key: "DELIVERY_old" }, { label: "Cũ · Lấy", key: "PICK_old" }, { label: "Cũ · Trả", key: "RETURN_old" },
+  { label: "Mới · Giao", key: "DELIVERY_new" }, { label: "Mới · Lấy", key: "PICK_new" }, { label: "Mới · Trả", key: "RETURN_new" },
+];
 // BC có cả Giao & Lấy → Hỗn hợp; có Lấy (kể cả +Trả) → Chuyên Lấy; có Giao → Chuyên Giao; chỉ Trả → Chuyên Trả
 function bcKindOf(bc: BcInfo | undefined, dvhc: Dvhc): BcKind {
   if (!bc?.area) return "NONE";
@@ -56,27 +62,50 @@ function bcKindOf(bc: BcInfo | undefined, dvhc: Dvhc): BcKind {
   if (hasR) return "R";
   return "NONE";
 }
+// loại hình BC theo HỒ SƠ chung (cả phường mới + cũ) — dùng cho marker/legend, không phụ thuộc ĐVHC đang xem
+function bcKindAny(bc: BcInfo | undefined): BcKind {
+  if (!bc?.area) return "NONE";
+  const hasD = bc.area.DELIVERY.nC > 0 || bc.area.DELIVERY.oC > 0;
+  const hasP = bc.area.PICK.nC > 0 || bc.area.PICK.oC > 0;
+  const hasR = bc.area.RETURN.nC > 0 || bc.area.RETURN.oC > 0;
+  if (hasD && hasP) return "MIX";
+  if (hasP) return "P";
+  if (hasD) return "D";
+  if (hasR) return "R";
+  return "NONE";
+}
+// màu phường = loại hình BC phụ trách (theo hồ sơ chung). Có BC nhưng không có loại GHNExpress (bộ chỉ định) → "COV"; không có BC → NONE
+function wardKind(id: string | undefined, bcById: Record<string, BcInfo>): BcKind {
+  if (!id) return "NONE";
+  const k = bcKindAny(bcById[id]);
+  return k === "NONE" ? "COV" : k;
+}
 const HILITE = { fill: "#dc2626", line: "#b91c1c" };
 const CLICK = { fill: "#dc2626", line: "#7f1d1d" };
 const BC_SEL = "#dc2626";
 
+type Ring = number[][];
 type Feat = {
   type: "Feature";
   properties: { wardCode?: string; wardName?: string; provinceName?: string };
-  geometry: { type: string; coordinates: number[][][][] };
+  geometry: { type: string; coordinates: number[][][] | number[][][][] };
 };
 type Geo = { type: "FeatureCollection"; features: Feat[] };
 type WardMap = Record<string, string>; // wardCode → bcId
 type UncWard = { code: string; name: string; prov: string };
 
+// Chuẩn hoá: trả về list polygon (mỗi polygon = list ring), xử lý cả Polygon & MultiPolygon (mapshaper xuất cả 2)
+function polysOf(geom: { type: string; coordinates: number[][][] | number[][][][] }): Ring[][] {
+  return geom.type === "MultiPolygon" ? (geom.coordinates as Ring[][]) : [geom.coordinates as Ring[]];
+}
 function centroidOf(f: Feat): [number, number] {
-  const ring = f.geometry.coordinates?.[0]?.[0];
+  const ring = polysOf(f.geometry)?.[0]?.[0];
   if (!ring || !ring.length) return [0, 0];
   let sx = 0, sy = 0;
   for (const [lng, lat] of ring) { sx += lat; sy += lng; }
   return [sx / ring.length, sy / ring.length];
 }
-function ringAreaKm2(ring: number[][]): number {
+function ringAreaKm2(ring: Ring): number {
   if (ring.length < 3) return 0;
   let latSum = 0; for (const p of ring) latSum += p[1];
   const latRef = latSum / ring.length;
@@ -90,13 +119,13 @@ function ringAreaKm2(ring: number[][]): number {
 }
 function featureAreaKm2(f: Feat): number {
   let total = 0;
-  for (const poly of f.geometry.coordinates)
+  for (const poly of polysOf(f.geometry))
     for (let ri = 0; ri < poly.length; ri++) total += (ri === 0 ? 1 : -1) * ringAreaKm2(poly[ri]);
   return Math.max(0, total);
 }
 function featureBounds(f: Feat): [[number, number], [number, number]] {
   let a = 90, b = -90, c = 180, d = -180;
-  for (const poly of f.geometry.coordinates)
+  for (const poly of polysOf(f.geometry))
     for (const ring of poly)
       for (const [lng, lat] of ring) {
         if (lat < a) a = lat; if (lat > b) b = lat;
@@ -127,14 +156,16 @@ function FitBounds({ bounds }: { bounds: [[number, number], [number, number]] | 
 }
 
 export function CoverageMap({
-  srcs, otherSrcs, mapSrcs, otherMapSrcs, bcById, dvhc, mode,
+  srcs, otherSrcs, mapSrcs, otherMapSrcs, bcById, dvhc, mode, setMeta, coverageStats,
   bcCodes, wardCodes, clickedWard, onClickWard, onToggleBc,
-  selectedBc, wardFocusTick, focusWard, focusBc, focusTick, setMode, onWardsLoaded, onStats, onBcsInScope,
+  selectedBc, wardFocusTick, focusWard, focusBc, focusTick, onWardsLoaded, onStats, onBcsInScope,
   scopeLabel, height = 640,
 }: {
   srcs: string[]; otherSrcs: string[]; mapSrcs: string[]; otherMapSrcs: string[];
   bcById: Record<string, BcInfo>;
   dvhc: Dvhc; mode: CoverageMode;
+  setMeta?: Record<string, { nhom: string; khachHang: string | null }>;
+  coverageStats?: { ghnBcCount: number; coverage: Record<string, number> } | null;
   bcCodes: string[]; wardCodes: string[]; clickedWard: string | null;
   onClickWard: (code: string, additive: boolean) => void;
   onToggleBc: (code: string) => void;
@@ -143,7 +174,6 @@ export function CoverageMap({
   focusWard: string | null;
   focusBc: string | null;
   focusTick: number;
-  setMode: SetMode;
   onWardsLoaded: (wards: { code: string; name: string; prov: string }[]) => void;
   onStats: (s: CoverageStats) => void;
   onBcsInScope: (ids: string[]) => void;
@@ -157,6 +187,7 @@ export function CoverageMap({
   const [loading, setLoading] = useState(true);
   const [noPolygon, setNoPolygon] = useState(false);
   const [kindFilter, setKindFilter] = useState<BcKind[]>([]); // lọc theo loại hình BC (bấm legend)
+  const [showCov, setShowCov] = useState(false); // panel tỉ lệ coverage mạng chuẩn (góc, thu gọn)
   const geoRef = useRef<LeafletGeoJSON | null>(null);
   const srcKey = srcs.join("|");
   const kindActive = kindFilter.length > 0;
@@ -207,7 +238,7 @@ export function CoverageMap({
   // marker bộ MẶC ĐỊNH = BC phục vụ phường (theo ward map), tại vị trí thật, màu theo loại hình
   const defaultMarkers = useMemo(() => {
     const out: { id: string; name: string; lat: number; lng: number; kind: BcKind; special: boolean }[] = [];
-    bcSets.union.forEach((id) => { const b = bcById[id]; if (b && b.lat != null && b.lng != null) out.push({ id, name: b.name, lat: b.lat, lng: b.lng, kind: bcKindOf(b, dvhc), special: !!b.sets?.length }); });
+    bcSets.union.forEach((id) => { const b = bcById[id]; if (b && b.lat != null && b.lng != null) { const k = bcKindAny(b); out.push({ id, name: b.name, lat: b.lat, lng: b.lng, kind: k === "NONE" ? "COV" : k, special: !!b.sets?.length }); } });
     return out;
   }, [bcSets, bcById, dvhc]);
 
@@ -255,12 +286,11 @@ export function CoverageMap({
   const styleFn = useCallback((feature?: { properties?: { wardCode?: string } }): PathOptions => {
     const code = String(feature?.properties?.wardCode ?? "");
     const id = wmap?.[code];
-    const kind = id ? bcKindOf(bcById[id], dvhc) : "NONE";
+    const kind = wardKind(id, bcById);
     const col = KIND_COLOR[kind];
-    const dim: PathOptions = mode === "only"
-      ? { opacity: 0, fillOpacity: 0, weight: 0 }
+    const HIDE: PathOptions = { opacity: 0, fillOpacity: 0, weight: 0 };
+    const dim: PathOptions = mode === "only" ? HIDE
       : { color: col.line, weight: 0.3, fillColor: col.fill, fillOpacity: 0.1 };
-    if (setMode === "special") return { opacity: 0, fillOpacity: 0, weight: 0 }; // bộ chỉ định không có polygon phường
     if (kindActive && !kindFilter.includes(kind)) return dim;        // lọc theo loại hình BC
     if (code === clickedWard) return { color: CLICK.line, weight: 2.5, fillColor: CLICK.fill, fillOpacity: 0.6 };
     if (filterActive) {
@@ -268,7 +298,7 @@ export function CoverageMap({
       return dim;
     }
     return { color: col.line, weight: 0.4, fillColor: col.fill, fillOpacity: kind === "NONE" ? 0.4 : 0.5 };
-  }, [wmap, bcById, dvhc, filterActive, clickedWard, wardInFilter, mode, kindActive, kindFilter, setMode]);
+  }, [wmap, bcById, dvhc, filterActive, clickedWard, wardInFilter, mode, kindActive, kindFilter]);
 
   useEffect(() => { geoRef.current?.setStyle(styleFn as (f: unknown) => PathOptions); }, [styleFn, geo]);
 
@@ -288,26 +318,21 @@ export function CoverageMap({
     return has ? [[a, c], [b, d]] : null;
   }, [geo]);
 
-  // marker bộ CHỈ ĐỊNH = BC có sets, nằm trong khung nhìn (bbox scope) — bộ đặc biệt không có polygon phường
-  const specialMarkers = useMemo(() => {
-    if (!scopeBounds) return [] as { id: string; name: string; lat: number; lng: number; kind: BcKind; special: boolean }[];
-    const [[a, c], [b, d]] = scopeBounds;
-    const out: { id: string; name: string; lat: number; lng: number; kind: BcKind; special: boolean }[] = [];
-    for (const id in bcById) {
-      const bc = bcById[id];
-      if (!bc.sets?.length || bc.lat == null || bc.lng == null) continue;
-      if (bc.lat >= a && bc.lat <= b && bc.lng >= c && bc.lng <= d) out.push({ id, name: bc.name, lat: bc.lat, lng: bc.lng, kind: bcKindOf(bc, dvhc), special: true });
+  // bbox các phường ĐƯỢC BỘ ĐANG XEM PHỦ (có BC) → fit về đúng vùng hoạt động của bộ (GHNEXPRESS ≈ scope)
+  const coveredBounds = useMemo<[[number, number], [number, number]] | null>(() => {
+    if (!geo || !wmap) return null;
+    let a = 90, b = -90, c = 180, d = -180, has = false;
+    for (const f of geo.features) {
+      if (!wmap[String(f.properties.wardCode ?? "")]) continue;
+      const [lat, lng] = centroidOf(f); has = true;
+      if (lat < a) a = lat; if (lat > b) b = lat; if (lng < c) c = lng; if (lng > d) d = lng;
     }
-    return out;
-  }, [bcById, scopeBounds, dvhc]);
+    return has ? [[a, c], [b, d]] : null;
+  }, [geo, wmap]);
 
-  // marker hiển thị theo Bộ vận hành: mặc định / chỉ định / tất cả
-  const markers = useMemo(() => {
-    if (setMode === "special") return specialMarkers;
-    if (setMode === "default") return defaultMarkers;
-    const ids = new Set(defaultMarkers.map((m) => m.id));
-    return [...defaultMarkers, ...specialMarkers.filter((m) => !ids.has(m.id))];
-  }, [defaultMarkers, specialMarkers, setMode]);
+  // marker = BC phục vụ phường của bộ đang xem (union). Cờ special = BC còn phục vụ bộ chỉ định khác → viền cam.
+  const markers = defaultMarkers;
+  const specialCount = useMemo(() => markers.filter((m) => m.special).length, [markers]);
 
   // bounds chỉ dựa trên LỰA CHỌN TỪ DROPDOWN (bcCodes/wardCodes) — KHÔNG tính clickedWard
   // → bấm polygon trên map không làm đổi zoom (fix lỗi zoom out khi click)
@@ -343,9 +368,9 @@ export function CoverageMap({
       if (bc?.lat != null) return [[bc.lat - 0.05, bc.lng! - 0.05], [bc.lat + 0.05, bc.lng! + 0.05]];
     }
     if (mode === "only" && dropdownActive && filterBounds) return filterBounds;
-    return scopeBounds;
+    return coveredBounds ?? scopeBounds; // fit về vùng phủ của bộ đang xem (cả nước + bộ → zoom đúng vùng hoạt động)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focusWard, focusBc, geo, wmap, bcById, mode, dropdownActive, filterBounds, scopeBounds, focusTick, wardFocusTick]);
+  }, [focusWard, focusBc, geo, wmap, bcById, mode, dropdownActive, filterBounds, coveredBounds, scopeBounds, focusTick, wardFocusTick]);
 
   const wardInfo = useMemo(() => {
     if (!clickedWard) return null;
@@ -354,34 +379,20 @@ export function CoverageMap({
     return { code: clickedWard, ...meta, bcName: bc?.name ?? null, bcId: bc?.id ?? null, bcKind: bc ? bcKindOf(bc, dvhc) : null };
   }, [clickedWard, wardMeta, wmap, bcById]);
 
-  const shownWards = useMemo(() => {
-    if (!geo || setMode === "special") return 0; // bộ chỉ định không vẽ polygon phường
-    return geo.features.filter((f) => {
-      const code = String(f.properties.wardCode ?? "");
-      const id = wmap?.[code];
-      const kind = id ? bcKindOf(bcById[id], dvhc) : "NONE";
-      if (kindActive && !kindFilter.includes(kind)) return false;
-      if (filterActive && !wardInFilter(code)) return false;
-      return true;
-    }).length;
-  }, [geo, wmap, bcById, dvhc, kindActive, kindFilter, filterActive, wardInFilter, setMode]);
   const shownBc = useMemo(
     () => (kindActive ? markers.filter((m) => kindFilter.includes(m.kind)).length : markers.length),
     [markers, kindActive, kindFilter],
   );
+  // số lượng BC theo loại hình (cho legend — chỉ đếm BC, không đếm phường)
+  const bcKindCounts = useMemo(() => {
+    const c: Record<BcKind, number> = { MIX: 0, D: 0, P: 0, R: 0, COV: 0, NONE: 0 };
+    for (const m of markers) c[m.kind]++;
+    return c;
+  }, [markers]);
   const noBcCount = useMemo(() => {
     if (!geo || !wmap) return 0;
     return geo.features.reduce((n, f) => n + (wmap[String(f.properties.wardCode ?? "")] ? 0 : 1), 0);
   }, [geo, wmap]);
-  // số phường theo loại hình BC (cho legend)
-  const kindCounts = useMemo(() => {
-    const c: Record<BcKind, number> = { MIX: 0, D: 0, P: 0, R: 0, NONE: 0 };
-    if (geo && wmap) for (const f of geo.features) {
-      const id = wmap[String(f.properties.wardCode ?? "")];
-      c[id ? bcKindOf(bcById[id], dvhc) : "NONE"]++;
-    }
-    return c;
-  }, [geo, wmap, bcById, dvhc]);
 
   return (
     <div className="rounded-md overflow-hidden border border-[var(--color-border)] relative" style={{ height, minHeight: 520 }}>
@@ -393,7 +404,7 @@ export function CoverageMap({
             style={styleFn as () => PathOptions} onEachFeature={onEachFeature as (f: unknown, l: Layer) => void} />
         )}
         {markers.map((m, mi) => {
-          if (setMode !== "special" && kindActive && !kindFilter.includes(m.kind)) return null;
+          if (kindActive && !kindFilter.includes(m.kind)) return null;
           const isHl = hlBc.has(m.id);
           if (mode === "only" && filterActive && !isHl) return null;
           // BC chỉ định: viền vàng cam nổi bật + to hơn
@@ -416,30 +427,55 @@ export function CoverageMap({
       )}
 
       <div className="absolute bottom-2 left-2 z-[1000] bg-white/95 border border-[var(--color-border)] rounded-md px-3 py-2 text-[10px] text-[var(--color-text-muted)] shadow-sm space-y-1 max-w-[260px]">
-        {geo && (<div className="font-medium uppercase tracking-wide">{shownWards} phường/xã · {shownBc} BC {filterActive || kindActive ? "(đang lọc)" : ""}</div>)}
+        {geo && (<div className="font-medium uppercase tracking-wide">{shownBc} BC {filterActive || kindActive ? "(đang lọc)" : ""}</div>)}
         <div className="flex items-center justify-between">
-          <span className="text-[9px] uppercase tracking-wide">Loại hình BC ({dvhc === "new" ? "phường mới" : "phường cũ"}) — bấm để lọc</span>
+          <span className="text-[9px] uppercase tracking-wide">Loại hình BC — bấm để lọc</span>
           {kindActive && <button type="button" onClick={() => setKindFilter([])} className="text-[9px] text-[var(--color-ghn-red)] hover:underline">bỏ lọc</button>}
         </div>
         <div className="grid grid-cols-2 gap-x-2 gap-y-0.5">
-          {(["MIX", "D", "P", "R", "NONE"] as BcKind[]).map((k) => {
+          {(["MIX", "D", "P", "R", "COV"] as BcKind[]).filter((k) => bcKindCounts[k] > 0).map((k) => {
             const on = kindFilter.includes(k);
             return (
               <button key={k} type="button" onClick={() => toggleKind(k)}
                 className={cn("inline-flex items-center gap-1 px-1 rounded text-left hover:bg-[var(--color-hover)]",
                   on && "ring-1 ring-[var(--color-ghn-red)] bg-[var(--color-row-selected)] font-medium",
                   kindActive && !on && "opacity-40")}>
-                <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ background: KIND_COLOR[k].fill, opacity: k === "NONE" ? 0.5 : 0.85 }} />
-                {KIND_LABEL[k]} ({kindCounts[k]})
+                <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ background: KIND_COLOR[k].fill, opacity: 0.85 }} />
+                {KIND_LABEL[k]} ({bcKindCounts[k]} BC)
               </button>
             );
           })}
         </div>
         <div className="flex items-center gap-1 pt-0.5 border-t border-[var(--color-border)]">
           <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: "#f59e0b", border: "1.5px solid #b45309" }} />
-          BC chỉ định ({specialMarkers.length} trong khung) — chấm viền cam
+          BC có bộ chỉ định ({specialCount}) — chấm viền cam
         </div>
       </div>
+
+      {coverageStats?.ghnBcCount ? (
+        <div className="absolute bottom-2 right-2 z-[1000] text-[10px]">
+          <button type="button" onClick={() => setShowCov((v) => !v)}
+            className="bg-white/95 border border-[var(--color-border)] rounded-md px-2 py-1 shadow-sm text-[var(--color-text-muted)] hover:bg-[var(--color-hover)] flex items-center gap-1">
+            <span className="font-medium">Coverage mạng chuẩn</span> <span className="text-[var(--color-text-faint)]">N={coverageStats.ghnBcCount.toLocaleString("vi-VN")}</span> <span>{showCov ? "▾" : "▸"}</span>
+          </button>
+          {showCov && (
+            <div className="mt-1 bg-white/95 border border-[var(--color-border)] rounded-md p-2 shadow-md w-[206px] space-y-1">
+              {COV_ROWS.map((r) => {
+                const n = coverageStats.coverage[r.key] ?? 0;
+                const pct = (n / coverageStats.ghnBcCount) * 100;
+                const col = pct >= 85 ? "#0f766e" : pct >= 60 ? "#d97706" : "#b91c1c";
+                return (
+                  <div key={r.key} className="flex items-center gap-1.5" title={`${n.toLocaleString("vi-VN")} / ${coverageStats.ghnBcCount.toLocaleString("vi-VN")} BC`}>
+                    <span className="w-12 shrink-0 text-[var(--color-text-muted)]">{r.label}</span>
+                    <span className="flex-1 h-2.5 rounded bg-[var(--color-hover)] overflow-hidden"><span className="block h-full rounded" style={{ width: `${pct}%`, background: col }} /></span>
+                    <span className="w-9 text-right tabular-nums font-medium text-[var(--color-text)]">{pct.toFixed(1)}%</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      ) : null}
 
       {wardInfo && (
         <div className="absolute top-2 left-2 z-[1000] bg-white border border-[var(--color-border)] rounded-md px-3 py-2 text-xs shadow-md w-60">
@@ -469,14 +505,14 @@ export function CoverageMap({
         </div>
       )}
 
-      {selectedBc && <BcProfilePanel bc={selectedBc} onClose={() => onToggleBc(selectedBc.id)} />}
+      {selectedBc && <BcProfilePanel bc={selectedBc} setMeta={setMeta} onClose={() => onToggleBc(selectedBc.id)} />}
     </div>
   );
 }
 
 function fmtArea(n: number | null | undefined) { return n == null ? "0" : n >= 100 ? `${Math.round(n)}` : `${Math.round(n * 10) / 10}`; }
 
-function BcProfilePanel({ bc, onClose }: { bc: BcInfo; onClose: () => void }) {
+function BcProfilePanel({ bc, setMeta, onClose }: { bc: BcInfo; setMeta?: Record<string, { nhom: string; khachHang: string | null }>; onClose: () => void }) {
   const Row = ({ label, children }: { label: string; children: React.ReactNode }) => (
     <div className="flex items-start justify-between gap-3 py-0.5">
       <span className="text-[var(--color-text-muted)] shrink-0">{label}</span>
@@ -502,17 +538,24 @@ function BcProfilePanel({ bc, onClose }: { bc: BcInfo; onClose: () => void }) {
         {bc.lat != null && <Row label="Toạ độ"><span className="font-mono text-[10px]">{bc.lat.toFixed(4)}, {bc.lng!.toFixed(4)}</span></Row>}
       </div>
       <div className="mt-2 pt-2 border-t border-[var(--color-border)]">
-        <div className="text-[10px] uppercase tracking-wide text-[var(--color-text-muted)] mb-1">Bộ vận hành</div>
-        {bc.sets?.length ? (
-          <div className="flex flex-wrap gap-1">
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--color-hover)] border border-[var(--color-border)] text-[var(--color-text-muted)]">Mặc định (GHNExpress)</span>
-            {bc.sets.map((s) => (
-              <span key={s} className="text-[10px] px-1.5 py-0.5 rounded text-white" style={{ background: "#b45309" }}>{s}</span>
-            ))}
-          </div>
-        ) : (
+        <div className="text-[10px] uppercase tracking-wide text-[var(--color-text-muted)] mb-1">
+          Bộ dịch vụ {bc.sets?.length ? `· ${bc.sets.length} bộ chỉ định` : "· chỉ mặc định"}
+        </div>
+        <div className="flex flex-wrap gap-1">
           <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--color-hover)] border border-[var(--color-border)] text-[var(--color-text-muted)]">Mặc định (GHNExpress)</span>
-        )}
+          {bc.sets?.map((s) => {
+            const m = setMeta?.[s];
+            return (
+              <span key={s} className="text-[10px] px-1.5 py-0.5 rounded text-white" style={{ background: "#b45309" }}
+                title={m ? `${m.nhom}${m.khachHang ? ` · KH: ${m.khachHang}` : ""}` : s}>
+                {s}{m?.khachHang ? ` (${m.khachHang})` : ""}
+              </span>
+            );
+          })}
+        </div>
+        {bc.customers?.length ? (
+          <div className="mt-1 text-[10px] text-[var(--color-text-muted)]">Khách hàng: <span className="text-[var(--color-text)]">{bc.customers.join(", ")}</span></div>
+        ) : null}
       </div>
       {bc.area && (
         <div className="mt-2 pt-2 border-t border-[var(--color-border)]">

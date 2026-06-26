@@ -13,6 +13,7 @@ import {
   Bus,
   Target,
   Map,
+  Waypoints,
   ChevronDown,
   ChevronRight,
   type LucideProps,
@@ -35,7 +36,8 @@ const NAV: NavItem[] = [
   { label: "Gán đơn", href: "/routing", icon: Route },
   { label: "Mạng lưới BC", href: "/network", icon: Truck },
   { label: "Phạm vi BC", href: "/coverage", icon: Map },
-  { label: "Định tuyến", href: "/transport", icon: Bus },
+  { label: "Tuyến Tải", href: "/transport", icon: Bus },
+  { label: "Bản đồ chuyến tải", href: "/route-map", icon: Waypoints },
   { label: "Quản lý mục tiêu", href: "/targets", icon: Target },
   {
     label: "Báo cáo",

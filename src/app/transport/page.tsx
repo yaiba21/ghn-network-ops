@@ -32,10 +32,6 @@ import { X } from "lucide-react";
 import { REGION_LABEL_VI, type RegionCode } from "@/lib/types";
 
 // Leaflet cần window → client-only
-const LeafletTransportMap = dynamic(
-  () => import("@/components/ui/LeafletTransportMap").then((m) => m.LeafletTransportMap),
-  { ssr: false, loading: () => <div className="h-[560px] ghn-skeleton rounded-md" /> },
-);
 const TripRouteMap = dynamic(
   () => import("@/components/ui/TripRouteMap").then((m) => m.TripRouteMap),
   { ssr: false, loading: () => <div className="h-[300px] ghn-skeleton rounded-md" /> },
@@ -58,7 +54,6 @@ export default function TransportPage() {
   const routeTypes = useMemo(() => getTransportByRouteType(filter), [filter]);
   const laneHealth = useMemo(() => getLaneHealth(filter, 30), [filter]);
   const laneOpts = useMemo(() => getLaneCodesForFilter(filter), [filter]);
-  const map = useMemo(() => getTransportMap(filter, 14), [filter]);
   const alerts = useMemo(() => getTransportAlerts(filter), [filter]);
   const regionCost = useMemo(() => getTransportCostByRegion(filter), [filter]);
   const updated = dataUpdatedAt();
@@ -82,9 +77,9 @@ export default function TransportPage() {
       <PageHeader
         breadcrumb={[
           { label: "GHN Network Ops", href: "/" },
-          { label: "Định tuyến" },
+          { label: "Tuyến Tải" },
         ]}
-        title="Định tuyến (Routing & Transportation)"
+        title="Tuyến Tải (Transportation & Linehaul)"
         subtitle="Chuyến xe realtime, fill rate, NCC, sức khoẻ tuyến. 1 tuyến gồm nhiều trip — lọc theo mã tuyến."
         updatedAt={updated}
       />
@@ -130,14 +125,6 @@ export default function TransportPage() {
         <KpiCard label="Leadtime gán" value={kpis.leadtimeGanH} unit="h" deltaPct={0} status={kpis.leadtimeGanH <= 2 ? "green" : kpis.leadtimeGanH <= 3 ? "amber" : "red"} direction="lower-better" target={1.5} size="sm" />
         <KpiCard label="Leadtime LTC" value={kpis.leadtimeLtcH} unit="h" deltaPct={0} status={kpis.leadtimeLtcH <= 4 ? "green" : kpis.leadtimeLtcH <= 6 ? "amber" : "red"} direction="lower-better" target={4} size="sm" />
       </section>
-
-      {/* === Leaflet map tuyến + điểm chạm === */}
-      <Card
-        title="Bản đồ tuyến vận tải — KTC + điểm chạm"
-        subtitle="Tuyến vẽ theo đường bộ thực tế (bám đường, nằm trong đất liền). KTC chấm cam (size = parcels). Hover/chọn 1 tuyến bên phải → hiện chuỗi điểm chạm BC lấy → KTC → BC giao."
-      >
-        <LeafletTransportMap nodes={map.nodes} routes={map.routes} />
-      </Card>
 
       {/* === Bảng sức khoẻ tuyến === */}
       <Card
