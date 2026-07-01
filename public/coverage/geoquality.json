@@ -1,0 +1,21 @@
+{
+"new": {
+"wards": 3321,
+"areaKm2": 330113,
+"overlapKm2": 0.0,
+"overlapPct": 0.0,
+"gapKm2": 54.4,
+"gapPct": 0.016,
+"gapHoles": 7
+},
+"old": {
+"wards": 10040,
+"areaKm2": 331452,
+"overlapKm2": 0.0,
+"overlapPct": 0.0,
+"gapKm2": 217.4,
+"gapPct": 0.066,
+"gapHoles": 32
+},
+"method": "overlap = Σ diện tích phường − diện tích union (phủ ≥2 lần); gap = lỗ hổng kín trong union; đo bằng shapely/GEOS."
+}

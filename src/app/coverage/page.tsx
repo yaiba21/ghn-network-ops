@@ -64,6 +64,7 @@ export default function CoveragePage() {
   const [mode, setMode] = useState<CoverageMode>("all");
   const [setList, setSetList] = useState<SetItem[]>([]);
   const [bcStats, setBcStats] = useState<{ ghnBcCount: number; coverage: Record<string, number> } | null>(null);
+  const [geoQ, setGeoQ] = useState<Record<string, { wards: number; overlapPct: number; overlapKm2: number; gapPct: number; gapKm2: number; gapHoles: number }> | null>(null);
   const [pdrSet, setPdrSet] = useState<string>("GHNEXPRESS"); // bộ dịch vụ đang xem
   const [pickType, setPickType] = useState<PickType>("DELIVERY");
   const [bcCodes, setBcCodes] = useState<string[]>([]);
@@ -83,6 +84,7 @@ export default function CoveragePage() {
     fetch("/coverage/bc.json").then((r) => r.json()).then(setBcArr).catch(() => {});
     fetch("/coverage/sets.json").then((r) => r.json()).then(setSetList).catch(() => {});
     fetch("/coverage/bcstats.json").then((r) => r.json()).then(setBcStats).catch(() => {});
+    fetch("/coverage/geoquality.json").then((r) => r.json()).then(setGeoQ).catch(() => {});
   }, []);
 
   const bcById = useMemo(() => {
@@ -268,6 +270,22 @@ export default function CoveragePage() {
       <StatsBar scopeLabel={`${scopeLabel} · ${pickType} · ${pdrSetLabel}`} bcCount={stats?.bcCount ?? bcsInScope.length} stats={stats}
         openList={openList} onToggleList={(k) => setOpenList((c) => (c === k ? null : k))}
         onFocusWard={focusUncoveredWard} onFocusBc={focusBcNav} />
+
+      {geoQ?.[dvhc] && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-[var(--color-text-muted)] rounded-md border border-[var(--color-border)] bg-white px-3 py-1.5"
+          title={`Toàn bản đồ VN · ${geoQ[dvhc].wards.toLocaleString("vi-VN")} phường ${dvhc === "new" ? "mới" : "cũ"}. overlap = phần bị phủ ≥2 lần; khoảng trắng = lỗ hổng kín giữa các phường (đo bằng shapely/GEOS).`}>
+          <span className="uppercase tracking-wide font-medium">Độ chính xác ranh giới ({dvhc === "new" ? "phường mới" : "phường cũ"})</span>
+          <span className="inline-flex items-center gap-1">
+            <span className="w-2 h-2 rounded-full" style={{ background: geoQ[dvhc].overlapPct < 0.5 ? "#16a34a" : "#d97706" }} />
+            Chồng lấn <b className="text-[var(--color-text)]">{geoQ[dvhc].overlapPct.toLocaleString("vi-VN")}%</b> ({geoQ[dvhc].overlapKm2.toLocaleString("vi-VN")} km²)
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <span className="w-2 h-2 rounded-full" style={{ background: geoQ[dvhc].gapPct < 0.5 ? "#16a34a" : "#d97706" }} />
+            Khoảng trắng <b className="text-[var(--color-text)]">{geoQ[dvhc].gapPct.toLocaleString("vi-VN")}%</b> ({geoQ[dvhc].gapKm2.toLocaleString("vi-VN")} km² · {geoQ[dvhc].gapHoles} lỗ)
+          </span>
+          <span className="text-[var(--color-text-faint)]">— đo trên {geoQ[dvhc].wards.toLocaleString("vi-VN")} phường toàn VN</span>
+        </div>
+      )}
 
       <CoverageMap
         srcs={srcs} otherSrcs={otherSrcs} mapSrcs={mapSrcs} otherMapSrcs={otherMapSrcs}
